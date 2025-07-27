@@ -279,54 +279,6 @@
     .on('click', function(event) {
         event.stopPropagation();
     })
-    .on('click', 'a', async function(event) {
-        var href = $(this).attr('href'); // Get the href attribute of the clicked link
-        console.log(`Clicked link: ${href}`); // Debug: Log the clicked link
-
-        event.preventDefault();
-        event.stopPropagation();
-
-        // Hide the menu
-        console.log('Hiding the menu...');
-        $menu._hide();
-
-        // Check if the user is authenticated
-        const token = localStorage.getItem('access_token'); // Retrieve the JWT token from localStorage
-        console.log(`Token: ${token}`); // Debug: Log the token
-
-        if (!token) {
-            // User is not authenticated, redirect to login with 'next' parameter
-            console.log('No token found. Redirecting to login...');
-            window.location.href = `/login?next=${encodeURIComponent(href)}`;
-        } else {
-            // User is authenticated, fetch the page content
-            try {
-                console.log(`Fetching content for: ${href} with token`);
-                const response = await fetch(href, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${token}` // Include the JWT token in the Authorization header
-                    }
-                });
-
-                if (response.ok) {
-                    const html = await response.text();
-                    console.log(`Successfully fetched content for ${href}. Rendering...`);
-                    window.location.href = href;
-                } else if (response.status === 401) {
-                    console.log('Unauthorized. Redirecting to login...');
-                    window.location.href = `/login?next=${encodeURIComponent(href)}`;
-                } else {
-                    // Other errors
-                    console.log(`Error fetching content for ${href}: ${response.status}`);
-                    alert('Error accessing the page.');
-                }
-            } catch (error) {
-                console.error('Error fetching the page:', error);
-                alert('An error occurred while accessing the page.');
-            }
-        }
-    });
 
 		$menu
 			.appendTo($body)

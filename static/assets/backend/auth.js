@@ -109,7 +109,6 @@ async function checkTokenOnPageLoad() {
       window.location.href = '/login';
     }
   } else {
-    // No token found, log the issue and redirect to login
     console.warn('No access token found. Redirecting to login...');
     await sleep(100); // Small delay to prevent rapid redirects
     window.location.href = '/login';

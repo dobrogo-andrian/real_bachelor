@@ -16,15 +16,16 @@
 .signup-form {
     padding: 20px;
     border-radius: 10px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    width: 300px;
+    width: 20vw;
+    height: 80vh;
     display: flex;
     flex-direction: column;
+    min-width: 300px ;
+    min-height: 350px;
 }
 
 .signup-form h1 {
     text-align: center;
-    color: #333;
 }
 
 .signup-form label {
@@ -36,6 +37,7 @@
     padding: 10px;
     border: 1px solid;
     border-radius: 5px;
+    min-height: 50px;
 }
 
 .btn.signup-btn {
