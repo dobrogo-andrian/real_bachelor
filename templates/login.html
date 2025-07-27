@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login Page</title>
+    <link rel="stylesheet" href="../static/css/login.css" />
+  </head>
+  <body>
+    <div class="login-container">
+      <form class="login-form" id="login-form">
+        <h1>Login</h1>
+        <p class="error" id="error-msg" style="display: none;"></p>
+
+        <label for="username">Username</label>
+        <input type="text" id="username" required />
+
+        <label for="password">Password</label>
+        <input type="password" id="password" required />
+
+        <button type="submit" class="btn login-btn">Login</button>
+
+        <div class="login-links">
+          <a href="/">Home</a>
+          <a href="/reset-password">Forgot Password?</a>
+          <a href="/signup">Sign Up</a>
+        </div>
+      </form>
+    </div>
+
+    <script type="module">
+      const loginForm = document.getElementById('login-form');
+      const nextUrl = new URLSearchParams(window.location.search).get('next') || '/'; // Get 'next' from query params
+
+      // Helper function to check if a specific cookie exists
+      function getCookie(name) {
+        const cookies = document.cookie.split('; ');
+        for (let cookie of cookies) {
+          const [key, value] = cookie.split('=');
+          if (key === name) {
+            return value;
+          }
+        }
+        return null;
+      }
+
+      // Check if the user is already logged in (access_token exists)
+      const accessToken = getCookie('access_token');
+      if (accessToken) {
+        console.log('User is already logged in, redirecting to:', nextUrl);
+        window.location.href = nextUrl; // Redirect to the original page
+      }
+
+      loginForm.addEventListener('submit', async (event) => {
+        event.preventDefault(); // Prevent the default form submission
+
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        try {
+          // Send login request
+          const response = await fetch('/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+          });
+
+          if (response.ok) {
+            // Wait for the server to set the cookies
+            const data = await response.json();
+            console.log('Login successful, redirecting to:', nextUrl); // Debug: Check redirect URL
+
+            // Delay to ensure cookies are set (optional, usually not necessary)
+            setTimeout(() => {
+              window.location.href = nextUrl; // Redirect to the original page (nextUrl)
+            }, 100); // Short delay to ensure cookies are set
+          } else {
+            // Handle login errors
+            const errorMsg = document.getElementById('error-msg');
+            if (response.status === 401) {
+              errorMsg.textContent = 'Invalid username or password.';
+            } else if (response.status === 404) {
+              errorMsg.textContent = 'User not found.';
+            } else {
+              errorMsg.textContent = 'An error occurred. Please try again.';
+            }
+            errorMsg.style.display = 'block'; // Show the error message
+          }
+        } catch (error) {
+          console.error('Login failed:', error);
+          alert('An error occurred. Please try again.');
+        }
+      });
+    </script>
+  </body>
+</html>
