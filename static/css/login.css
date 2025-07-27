@@ -4,12 +4,10 @@
   justify-content: center;
   align-items: center;
   height: 100vh;
-  background-color: #f0f0f0;
 }
 
 .login-form {
   padding: 20px;
-  background-color: white;
   border-radius: 10px;
   box-shadow: 0 4px 8px rgba(0,0,0,0.1);
   width: 300px;
@@ -19,24 +17,20 @@
 
 .login-form h1 {
   text-align: center;
-  color: #333;
 }
 
 .login-form label {
   margin-bottom: 5px;
-  color: #666;
 }
 
 .login-form input {
   margin-bottom: 20px;
   padding: 10px;
-  border: 1px solid #ccc;
+  border: 1px solid;
   border-radius: 5px;
 }
 
 .btn.login-btn {
-  background-color: #0056b3;
-  color: white;
   padding: 10px;
   border: none;
   border-radius: 5px;
@@ -54,13 +48,11 @@
 }
 
 .login-links a {
-  color: #0056b3;
   text-decoration: none;
   margin-right: 10px;
 }
 
 .error {
-  color: red;
   margin-bottom: 15px;
   text-align: center;
 }

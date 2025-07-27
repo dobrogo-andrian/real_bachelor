@@ -3,7 +3,6 @@
     justify-content: center;
     align-items: center;
     height: 100vh;
-    background-color: #f0f0f0;
 }
 .links {
     text-align: center;
@@ -11,13 +10,11 @@
 }
 
 .links a {
-    color: #0056b3;
     text-decoration: none;
     margin-right: 10px; /* Adds spacing between multiple links */
 }
 .signup-form {
     padding: 20px;
-    background-color: white;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     width: 300px;
@@ -32,19 +29,16 @@
 
 .signup-form label {
     margin-bottom: 5px;
-    color: #666;
 }
 
 .signup-form input {
     margin-bottom: 20px;
     padding: 10px;
-    border: 1px solid #ccc;
+    border: 1px solid;
     border-radius: 5px;
 }
 
 .btn.signup-btn {
-    background-color: #0056b3;
-    color: white;
     padding: 10px;
     border: none;
     border-radius: 5px;
@@ -62,6 +56,5 @@
 }
 
 .links a {
-    color: #0056b3;
     text-decoration: none;
 }

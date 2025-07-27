@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Login Page</title>
     <link rel="stylesheet" href="../static/css/login.css" />
+    <link rel="stylesheet" href="../static/css/main.css" />
+    <noscript><link rel="stylesheet" href="../static/css/noscript.css" /></noscript>
   </head>
   <body>
     <div class="login-container">
@@ -44,13 +46,114 @@
         return null;
       }
 
-      // Check if the user is already logged in (access_token exists)
-      const accessToken = getCookie('access_token');
-      if (accessToken) {
-        console.log('User is already logged in, redirecting to:', nextUrl);
-        window.location.href = nextUrl; // Redirect to the original page
+      // Helper function to delete a specific cookie
+      function deleteCookie(name) {
+        document.cookie = `${name}=; Path=/; Max-Age=0; HttpOnly; Secure`;
       }
 
+      // Handle token-related errors globally
+      // Handle token-related errors globally
+      async function handleTokenError(action) {
+        switch (action) {
+          case 'logout':
+            // Delete cookies and redirect to login
+            deleteCookie('access_token');
+            deleteCookie('refresh_token');
+            window.location.href = '/login';
+            break;
+
+          case 'refresh':
+            // Attempt to refresh the token
+            try {
+              const refreshResponse = await fetch('/refresh', {
+                method: 'POST',
+                credentials: 'include', // Include cookies in the request
+              });
+
+              if (refreshResponse.ok) {
+                console.log('Token refreshed successfully');
+                // Retry the original request or reload the page
+                window.location.reload();
+              } else {
+                console.error('Failed to refresh token');
+                // Redirect to login if refresh fails
+                window.location.href = '/login';
+              }
+            } catch (error) {
+              console.error('Error refreshing token:', error);
+              window.location.href = '/login';
+            }
+            break;
+
+          case 'redirect_to_login':
+            // Redirect to login
+            window.location.href = '/login';
+            break;
+
+          default:
+            console.error('Unknown action:', action);
+            window.location.href = '/login';
+        }
+      }
+
+
+      // Check token errors on page load
+      // Check token errors on page load
+      async function checkTokenOnPageLoad() {
+  const accessToken = getCookie('access_token');
+
+  // Helper function to simulate sleep/delay
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  console.log('Checking token on page load...');
+
+  if (accessToken) {
+    try {
+          // Make a test request to validate the token
+          const response = await fetch('/user-info', {
+            method: 'GET',
+            credentials: 'include', // Include cookies in the request
+            headers: {
+              'Accept': 'application/json', // Indicate that this is an API call
+            },
+          });
+
+          if (response.status === 401) {
+            // Handle token-related errors
+            const data = await response.json();
+            console.error('Token error on page load:', data);
+
+            // Redirect or logout based on the server's action
+            await handleTokenError(data.action);
+          } else if (!response.ok) {
+            // Log unexpected errors and redirect to login
+            console.error('Unexpected error on page load:', response.statusText);
+            console.log('Redirecting to login due to unexpected error...');
+            await sleep(100); // Small delay to prevent rapid redirects
+            window.location.href = '/login';
+          } else {
+            console.log('Token is valid. Proceeding...');
+            // Token is valid, proceed with the page load
+          }
+        } catch (error) {
+          // Handle network or other unexpected errors
+          console.error('Error validating token on page load:', error);
+          console.log('Redirecting to login due to validation error...');
+          await sleep(100); // Small delay to prevent rapid redirects
+          window.location.href = '/login';
+        }
+      } else {
+        // No token found, log the issue and redirect to login
+        console.warn('No access token found. Redirecting to login...');
+      }
+    }
+
+      // Run token check on page load
+      checkTokenOnPageLoad();
+
+      // Handle login form submission
       loginForm.addEventListener('submit', async (event) => {
         event.preventDefault(); // Prevent the default form submission
 
@@ -70,20 +173,20 @@
             const data = await response.json();
             console.log('Login successful, redirecting to:', nextUrl); // Debug: Check redirect URL
 
-            // Delay to ensure cookies are set (optional, usually not necessary)
-            setTimeout(() => {
-              window.location.href = nextUrl; // Redirect to the original page (nextUrl)
-            }, 100); // Short delay to ensure cookies are set
-          } else {
+            // Redirect to the original page (nextUrl)
+            window.location.href = nextUrl;
+          } else if (response.status === 401 || response.status === 404) {
             // Handle login errors
             const errorMsg = document.getElementById('error-msg');
-            if (response.status === 401) {
-              errorMsg.textContent = 'Invalid username or password.';
-            } else if (response.status === 404) {
-              errorMsg.textContent = 'User not found.';
-            } else {
-              errorMsg.textContent = 'An error occurred. Please try again.';
-            }
+            errorMsg.textContent =
+              response.status === 401
+                ? 'Invalid username or password.'
+                : 'User not found.';
+            errorMsg.style.display = 'block'; // Show the error message
+          } else {
+            // Handle other errors
+            const errorMsg = document.getElementById('error-msg');
+            errorMsg.textContent = 'An error occurred. Please try again.';
             errorMsg.style.display = 'block'; // Show the error message
           }
         } catch (error) {

@@ -57,19 +57,16 @@ def get_db_connection():
     )
     return conn
 
+
 @app.route('/login', methods=['GET', 'POST'])
-@jwt_required(optional=True)  # Allow optional authentication
 def login():
     if request.method == 'GET':
-        # Check if the user is already authenticated
-        current_user = get_jwt_identity()
-        if current_user:
-            next_url = request.args.get('next', '/')
-            logger.debug(f"User {current_user} is already logged in, redirecting to {next_url}")
-            return redirect(next_url)  # Redirect to the next page if authenticated
-
-        # Render the login page if not authenticated
         next_url = request.args.get('next', '/')
+
+        # Prevent redirect loops by resetting `next` if it points to `/login`
+        if next_url == '/login':
+            next_url = '/'
+
         logger.debug(f"Rendering login page with next={next_url}")
         return render_template('login.html', next_url=next_url)
 
@@ -151,63 +148,110 @@ def landing():
 def test():
     return render_template('test.html')
 
-@app.route('/signup', methods=['POST'])
+@app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    data = request.json
-    username = data['username']
-    password = data['password']
-    email = data['email']
+    if request.method == 'GET':
+        # Render the signup page
+        return render_template('signup.html')  # Ensure you have a `signup.html` template
 
-    # Hash the password for security
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    elif request.method == 'POST':
+        # Handle user signup
+        data = request.json or request.form  # Support both JSON and form submissions
+        username = data.get('username')
+        password = data.get('password')
+        email = data.get('email')
 
-    # Connect to the database
-    conn = get_db_connection()
-    cursor = conn.cursor()
+        # Validate input
+        if not username or not password or not email:
+            return jsonify({'error': 'All fields are required'}), 400
 
-    # Insert new user into the database
-    try:
-        cursor.execute('''
-            INSERT INTO Users (Username, PasswordHash, Email)
-            VALUES (?, ?, ?)
-        ''', (username, password_hash, email))
-        conn.commit()
-        return jsonify({'message': 'User created successfully'}), 201
-    except Exception as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
+        # Hash the password for security
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+        # Connect to the database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        try:
+            # Check if the username or email already exists
+            cursor.execute('SELECT * FROM Users WHERE Username = ? OR Email = ?', (username, email))
+            existing_user = cursor.fetchone()
+            if existing_user:
+                return jsonify({'error': 'Username or email already exists'}), 409
+
+            # Insert new user into the database
+            cursor.execute('''
+                INSERT INTO Users (Username, PasswordHash, Email)
+                VALUES (?, ?, ?)
+            ''', (username, password_hash, email))
+            conn.commit()
+
+            # Redirect to the login page after successful signup
+            return jsonify({'message': 'User created successfully', 'redirect': '/login'}), 201
+        except Exception as e:
+            conn.rollback()
+            return jsonify({'error': str(e)}), 500
+        finally:
+            cursor.close()
+            conn.close()
 
 
 
 
-# Callback for invalid tokens
+
 @jwt.invalid_token_loader
 def invalid_token_callback(error):
     logger.debug(f"Invalid token error: {error}")
-    return jsonify({"error": "Invalid token"}), 401
+    # Check if the request is an API call (e.g., AJAX or Fetch)
+    if request.headers.get("Accept") == "application/json":
+        # Return a JSON response for API requests
+        return jsonify({"error": "Invalid token", "action": "logout"}), 401
+    else:
+        # Redirect to the login page for non-API requests (e.g., browser page loads)
+        next_url = request.path  # Preserve the original path for redirection
+        return redirect(url_for('login', next=next_url))
 
 # Callback for expired tokens
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
     logger.debug(f"Expired token for user: {jwt_payload.get('sub')}")
-    return jsonify({"error": "Token has expired"}), 401
+    # Check if the request is an API call (e.g., AJAX or Fetch)
+    if request.headers.get("Accept") == "application/json":
+        # Return a JSON response for API requests
+        return jsonify({"error": "Token has expired", "action": "refresh"}), 401  # Suggest refresh
+    else:
+        # Redirect to the login page for non-API requests (e.g., browser page loads)
+        next_url = request.path  # Preserve the original path for redirection
+        return redirect(url_for('login', next=next_url))
+
 
 # Callback for missing tokens
 @jwt.unauthorized_loader
 def missing_token_callback(error):
     logger.debug(f"Missing token error: {error}")
-    return jsonify({"error": "Missing token"}), 401
+    # Check if the request is an API call (e.g., AJAX or Fetch)
+    if request.headers.get("Accept") == "application/json":
+        # Return a JSON response for API requests
+        return jsonify({"error": "Missing token", "action": "redirect_to_login"}), 401  # Suggest login
+    else:
+        # Redirect to the login page for non-API requests (e.g., browser page loads)
+        next_url = request.path  # Preserve the original path for redirection
+        return redirect(url_for('login', next=next_url))
 
-# Callback for revoked tokens (if you use token revocation)
+
+# Callback for revoked tokens
 @jwt.revoked_token_loader
 def revoked_token_callback(jwt_header, jwt_payload):
     logger.debug(f"Revoked token for user: {jwt_payload.get('sub')}")
-    return jsonify({"error": "Token has been revoked"}), 401
+    if request.headers.get("Accept") == "application/json":
+        # Return a JSON response for API requests
+        return jsonify({"error": "Token has been revoked", "action": "logout"}), 401  # Suggest logout
+    else:
+        # Redirect to the login page for non-API requests (e.g., browser page loads)
+        next_url = request.path  # Preserve the original path for redirection
+        return redirect(url_for('login', next=next_url))
+
 
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
-    render_template('index.html')
