@@ -1,5 +1,5 @@
-import time
-from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory, make_response
+from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory
+from static.backend.load_data import load_data
 import pyodbc
 import hashlib
 from flask_cors import CORS
@@ -27,6 +27,7 @@ logger.debug("Application started.")
 CORS(app)
 jwt = JWTManager(app)
 
+
 @app.route('/static/<path:filename>')
 @jwt_required()
 def static_proxy(filename):
@@ -34,9 +35,11 @@ def static_proxy(filename):
     logger.debug(f"Current user: {current_user}")
     return send_from_directory('static', filename)
 
+
 @app.before_request
 def log_request():
     logger.debug(f"Incoming request: {request.method} {request.url}")
+
 
 @app.route('/refresh', methods=['POST'])
 @jwt_required(refresh=True)  # Use refresh=True for refresh tokens
@@ -46,6 +49,7 @@ def refresh():
     response = jsonify({'message': 'Token refreshed successfully'})
     set_access_cookies(response, new_access_token)  # Set the new access token in cookies
     return response, 200
+
 
 def get_db_connection():
     conn = pyodbc.connect(
@@ -97,11 +101,13 @@ def login():
         else:
             return jsonify({'error': 'User not found'}), 404
 
+
 @app.route('/logout', methods=['POST'])
 def logout():
     response = jsonify({'message': 'Logout successful'})
     unset_jwt_cookies(response)  # Remove the tokens from cookies
     return response, 200
+
 
 @app.route('/user-info')
 @jwt_required()
@@ -110,9 +116,11 @@ def user_info():
     # Fetch user details from the database using `current_user`
     return jsonify(username=current_user, email="email@example.com")  # Example data
 
+
 @app.route('/')
 def index():
     return render_template('index.html')
+
 
 @app.route('/elements')
 @jwt_required()
@@ -120,6 +128,7 @@ def elements():
     current_user = get_jwt_identity()
     logger.debug(f"Current user: {current_user}")
     return render_template('elements.html')
+
 
 @app.route('/generic')
 @jwt_required()
@@ -137,6 +146,7 @@ def submit_form():
     logger.debug(f"Form submitted by {current_user}: {data}")
     return jsonify({'message': 'Form submitted successfully!'}), 200
 
+
 @app.route('/landing')
 @jwt_required()
 def landing():
@@ -144,9 +154,11 @@ def landing():
     logger.debug(f"Current user: {current_user}")
     return render_template('landing.html')
 
+
 @app.route('/test')
 def test():
     return render_template('test.html')
+
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
@@ -196,7 +208,36 @@ def signup():
             conn.close()
 
 
+@app.route('/process-data', methods=['POST'])
+def process_data_endpoint():
+    try:
+        # Get parameters from the request (JSON payload)
+        params = request.json.get('params', {})
+        target_page = params["param1"]
+        number_of_posts = params["param2"]
+        instagram_username = params["param3"]
+        instagram_password = params["param4"]
 
+        # Validate input
+        if not params:
+            return jsonify({'error': 'No parameters provided.'}), 400
+
+        # Execute the sequence of functions
+        # Step 1: Load data
+        data = load_data(instagram_username, instagram_password, target_page, number_of_posts)
+        # # Step 2: Analyze data
+        # analyzed_data = analyze_data(data)
+        # # Step 3: Aggregate data
+        # aggregated_data = aggregate_data(analyzed_data)
+        # # Step 4: Process data
+        # final_result = process_data(aggregated_data)
+
+        # Return the final result to the frontend
+        return jsonify(
+            {'success': True, 'result': (target_page, number_of_posts, instagram_username, instagram_password)}), 200
+    except Exception as e:
+        # Handle unexpected errors
+        return jsonify({'error': str(e)}), 500
 
 
 @jwt.invalid_token_loader
@@ -210,6 +251,7 @@ def invalid_token_callback(error):
         # Redirect to the login page for non-API requests (e.g., browser page loads)
         next_url = request.path  # Preserve the original path for redirection
         return redirect(url_for('login', next=next_url))
+
 
 # Callback for expired tokens
 @jwt.expired_token_loader
@@ -250,7 +292,6 @@ def revoked_token_callback(jwt_header, jwt_payload):
         # Redirect to the login page for non-API requests (e.g., browser page loads)
         next_url = request.path  # Preserve the original path for redirection
         return redirect(url_for('login', next=next_url))
-
 
 
 if __name__ == "__main__":

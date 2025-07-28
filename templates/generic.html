@@ -9,8 +9,9 @@
 		<title>Generic - Forty by HTML5 UP</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-		<link rel="stylesheet" href="../static/css/main.css" />
-		<noscript><link rel="stylesheet" href="../static/css/noscript.css" /></noscript>
+		<link rel="stylesheet" href="../static/assets/css/main.css" />
+		<link rel="stylesheet" href="../static/assets/css/generic.css">
+		<noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
 	</head>
 	<body class="is-preload">
 
@@ -48,7 +49,7 @@
 									<header class="major">
 										<h1>Generic</h1>
 									</header>
-									<span class="image main"><img src="../static/images/pic11.jpg" alt="" /></span>
+									<span class="image main"><img src="../static/assets/images/pic11.jpg" alt="" /></span>
 									<p>This page is designed to analyze the data from instagram pages.</p>
 									<p>Take into account that to receive the most quality analysis you should choose popular pages with a lot of comments.</p>
 								</div>
@@ -60,26 +61,34 @@
 						<div class="inner">
 							<section>
 								<p>here should be info about what you will be writing and progressbar</p>
+								<div id="response-div">
+									<p id="response-p">here will be the text of the responce</p>
+								</div>
+
 							</section>
 							<section class="split">
 								<section>
 									<div class="contact-method">
 										<span class="icon solid alt fa-envelope"></span>
-										<label for="instagram_page">Instagram page</label>
+										<label for="instagram_page">Analyzed page</label>
 										<input type="text" id="instagram_page" required />
 										<label for="number_of_posts">Number of posts</label>
 										<input type="text" id="number_of_posts" required />
-										<button class="button">Submit</button>
 									</div>
 								</section>
 								<section>
 									<div class="contact-method">
 										<span class="icon solid alt fa-home"></span>
-										<label for="user_login">Login</label>
+										<label for="user_login">Instagram login</label>
 										<input type="text" id="user_login" required />
-										<label for="user_password">Password</label>
+										<label for="user_password">Instagram password</label>
 										<input type="text" id="user_password" required />
-										<button class="button">Start execution</button>
+									</div>
+								</section>
+
+								<section>
+									<div class="contact-method">
+										<button class="button" id="start_execution">Start execution</button>
 									</div>
 								</section>
 							</section>
@@ -112,6 +121,50 @@
 			<script src=".././static/assets/js/breakpoints.min.js"></script>
 			<script src=".././static/assets/js/util.js"></script>
 			<script src=".././static/assets/js/main.js"></script>
+			<script>
+				document.getElementById('start_execution').addEventListener('click', async () => {
+				  // Get input values
+				  const param1 = document.getElementById('instagram_page').value;
+				  const param2 = document.getElementById('number_of_posts').value;
+				  const param3 = document.getElementById('user_login').value;
+				  const param4 = document.getElementById('user_password').value;
+				  // Prepare the request payload
+				  const payload = {
+					params: {
+					  	param1: param1,
+					  	param2: param2,
+						param3: param3,
+						param4: param4
+					}
+				  };
+
+				  try {
+					// Send POST request to the backend
+					const response = await fetch('/process-data', {
+					  method: 'POST',
+					  headers: {
+						'Content-Type': 'application/json'
+					  },
+					  body: JSON.stringify(payload)
+					});
+
+					if (response.ok) {
+					  const data = await response.json();
+					  console.log('Response:', data);
+
+					  // Display the result
+					  document.getElementById('response-p').textContent = JSON.stringify(data.result, null, 2);
+					} else {
+					  const errorData = await response.json();
+					  console.error('Error:', errorData);
+					  document.getElementById('result-output').textContent = `Error: ${errorData.error}`;
+					}
+				  } catch (error) {
+					console.error('Error fetching data:', error);
+					document.getElementById('result-output').textContent = `Error: ${error.message}`;
+				  }
+				});
+			</script>
 
 	</body>
 </html>

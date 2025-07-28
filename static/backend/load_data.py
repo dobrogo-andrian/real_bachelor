@@ -37,9 +37,9 @@ def get_next_filename(base_filename, folder="unprocessed_data/comments1"):
     return os.path.join(folder, f"{base_filename}_{next_number}.csv")
 
 
-def setup_driver():
+def setup_driver(user_agent):
     options = Options()
-    options.add_argument(f"user-agent={ua.random}")
+    options.add_argument(f"user-agent={user_agent.random}")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-infobars")
     options.add_argument("--disable-notifications")
@@ -297,7 +297,7 @@ def find_scroll_element_by_scroll_properties(driver, element_owner):
         return None
 
 
-def collect_all_hrefs(container_element, target_page):
+def collect_all_hrefs(container_element, target_page, number_of_posts):
     """
     Збирає всі значення href з елементів <a> всередині вказаного контейнера.
 
@@ -316,10 +316,10 @@ def collect_all_hrefs(container_element, target_page):
     except Exception as e:
         print(f"[❌] Помилка при зборі посилань: {e}")
 
-    return hrefs[0:20]
+    return hrefs[0:number_of_posts]
 
 
-def load_all_posts(driver, target_page):
+def load_all_posts(driver, target_page, number_of_posts):
     time.sleep(random.uniform(2, 4))
     driver.get(f"https://www.instagram.com/{target_page}/")
     time.sleep(random.uniform(2, 4))
@@ -336,45 +336,49 @@ def load_all_posts(driver, target_page):
             break
     container_element = driver.find_element(By.XPATH,
                                             "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') and contains(., 'position: relative')]]")
-    return collect_all_hrefs(container_element)
+    return collect_all_hrefs(container_element, target_page,number_of_posts)
 
 
+def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
+    user_agent = UserAgent()
+    log = ""  # Initialize an empty string to store log messages
 
-
-def load_data(USERNAME="dobrogo_scientist", PASSWORD="andrian1233", target_pages=("zelenskiy_official")):
-    ua = UserAgent()
-
-    driver = setup_driver()
+    driver = setup_driver(user_agent)
     time.sleep(random.uniform(3, 5))
     driver.refresh()
     time.sleep(random.uniform(3, 5))
 
     try:
-        print("[🔍] Відкриваємо Instagram...")
+        log += "[🔍] Відкриваємо Instagram...\n"  # Add log message
         driver.get("https://www.instagram.com/")
         time.sleep(random.uniform(3, 5))
-        print("[🔍] збираємо cookies")
+
+        log += "[🔍] збираємо cookies\n"  # Add log message
         load_cookie_success = load_cookies(driver)
         if load_cookie_success:
-            print(f"[✅] успішно використано попередні Cookie")
+            log += "[✅] успішно використано попередні Cookie\n"  # Add success log
         else:
-            print("[❌] не вдалось використати попередні Cookie")
-        print("[🔍] Виконуємо авторизацію...")
+            log += "[❌] не вдалось використати попередні Cookie\n"  # Add failure log
+
+        log += "[🔍] Виконуємо авторизацію...\n"  # Add log message
         if load_cookie_success:
-            for target_page in target_pages:
-                for i in load_all_posts(driver):
-                    save_comments(driver, i)
+            for i in load_all_posts(driver, target_page, number_of_posts):
+                save_comments(driver, i, target_page)
         else:
             login_to_instagram(driver, USERNAME, PASSWORD)
             save_cookies(driver)
             if "/accounts/login/" not in driver.current_url:
-                for i in load_all_posts(driver):
-                    save_comments(driver, i)
+                for i in load_all_posts(driver, target_page, number_of_posts):
+                    save_comments(driver, i, target_page)
             else:
-                print(f"[❌] ./accounts/login/ in {driver.current_url}")
-        print("[✅] успішно завантажено всі дані")
+                log += f"[❌] ./accounts/login/ in {driver.current_url}\n"  # Add failure log
+
+        log += "[✅] успішно завантажено всі дані\n"  # Add success log
     except Exception as e:
-        print(f"[❌] Помилка: {e}")
+        log += f"[❌] Помилка: {e}\n"  # Add error log
 
     finally:
         driver.quit()
+
+    return log  # Return the concatenated log messages
+load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
