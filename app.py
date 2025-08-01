@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory
 from static.backend.load_data import load_data
-import pyodbc
+from static.backend.db_connection import insert_new_user, fetch_user
 import hashlib
 from flask_cors import CORS
 from flask_jwt_extended import (
@@ -51,17 +51,6 @@ def refresh():
     return response, 200
 
 
-def get_db_connection():
-    conn = pyodbc.connect(
-        'DRIVER={ODBC Driver 17 for SQL Server};'
-        'SERVER=localhost;'
-        'DATABASE=social-media-optimizer;'
-        'UID=social-media-optimizer;'
-        'PWD=social-media-optimizer'
-    )
-    return conn
-
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'GET':
@@ -79,10 +68,7 @@ def login():
         username = data['username']
         password = data['password']
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT PasswordHash FROM Users WHERE Username = ?', (username,))
-        user = cursor.fetchone()
+        user = fetch_user(username)
 
         if user:
             stored_password_hash = user[0]
@@ -91,7 +77,6 @@ def login():
                 access_token = create_access_token(identity=username)
                 refresh_token = create_refresh_token(identity=username)
 
-                # Set the tokens in cookies
                 response = jsonify({'message': 'Login successful'})
                 set_access_cookies(response, access_token)
                 set_refresh_cookies(response, refresh_token)
@@ -167,45 +152,17 @@ def signup():
         return render_template('signup.html')  # Ensure you have a `signup.html` template
 
     elif request.method == 'POST':
-        # Handle user signup
-        data = request.json or request.form  # Support both JSON and form submissions
+        data = request.json or request.form
         username = data.get('username')
         password = data.get('password')
         email = data.get('email')
 
-        # Validate input
         if not username or not password or not email:
             return jsonify({'error': 'All fields are required'}), 400
 
-        # Hash the password for security
         password_hash = hashlib.sha256(password.encode()).hexdigest()
 
-        # Connect to the database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        try:
-            # Check if the username or email already exists
-            cursor.execute('SELECT * FROM Users WHERE Username = ? OR Email = ?', (username, email))
-            existing_user = cursor.fetchone()
-            if existing_user:
-                return jsonify({'error': 'Username or email already exists'}), 409
-
-            # Insert new user into the database
-            cursor.execute('''
-                INSERT INTO Users (Username, PasswordHash, Email)
-                VALUES (?, ?, ?)
-            ''', (username, password_hash, email))
-            conn.commit()
-
-            # Redirect to the login page after successful signup
-            return jsonify({'message': 'User created successfully', 'redirect': '/login'}), 201
-        except Exception as e:
-            conn.rollback()
-            return jsonify({'error': str(e)}), 500
-        finally:
-            cursor.close()
-            conn.close()
+        insert_new_user(username, email, password_hash)
 
 
 @app.route('/process-data', methods=['POST'])
@@ -214,7 +171,7 @@ def process_data_endpoint():
         # Get parameters from the request (JSON payload)
         params = request.json.get('params', {})
         target_page = params["param1"]
-        number_of_posts = params["param2"]
+        number_of_posts = int(params["param2"])
         instagram_username = params["param3"]
         instagram_password = params["param4"]
 
@@ -225,6 +182,7 @@ def process_data_endpoint():
         # Execute the sequence of functions
         # Step 1: Load data
         data = load_data(instagram_username, instagram_password, target_page, number_of_posts)
+
         # # Step 2: Analyze data
         # analyzed_data = analyze_data(data)
         # # Step 3: Aggregate data
@@ -253,7 +211,6 @@ def invalid_token_callback(error):
         return redirect(url_for('login', next=next_url))
 
 
-# Callback for expired tokens
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
     logger.debug(f"Expired token for user: {jwt_payload.get('sub')}")

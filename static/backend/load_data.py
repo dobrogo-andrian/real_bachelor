@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 import random
 import pickle
@@ -11,6 +12,31 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
+from static.backend.db_connection import insert_data_to_database
+
+
+
+def delete_previos_files():
+    relative_directory = 'unprocessed_data'  # Replace with your relative directory path
+
+    # List all items in the relative directory
+    for filename in os.listdir(relative_directory):
+        file_path = os.path.join(relative_directory, filename)
+
+        # Check if it's a file
+        if os.path.isfile(file_path):
+            try:
+                os.remove(file_path)  # Delete the file
+                print(f"Deleted file: {file_path}")
+            except Exception as e:
+                print(f"Error deleting file {file_path}: {e}")
+        # Check if it's a directory
+        elif os.path.isdir(file_path):
+            try:
+                shutil.rmtree(file_path)  # Delete the directory and its contents
+                print(f"Deleted directory: {file_path}")
+            except Exception as e:
+                print(f"Error deleting directory {file_path}: {e}")
 
 
 def get_next_filename(base_filename, folder="unprocessed_data/comments1"):
@@ -67,21 +93,23 @@ def login_to_instagram(driver, username, password):
     try:
         driver.get("https://www.instagram.com/accounts/login/")
         time.sleep(random.uniform(3, 5))
-        username_field = driver.find_element(By.NAME, "username")
-        password_field = driver.find_element(By.NAME, "password")
+        i = 0
+        while "login" in str.lower(f"{driver.current_url}") and i <= 3:
+            i += 1
+            username_field = driver.find_element(By.NAME, "username")
+            password_field = driver.find_element(By.NAME, "password")
 
-        username_field.send_keys(username)
-        password_field.send_keys(password)
-        print("login and pass should appear, look for log in button")
-        time.sleep(random.uniform(3, 5))
+            username_field.send_keys(username)
+            password_field.send_keys(password)
+            print("login and pass should appear, look for log in button")
+            time.sleep(random.uniform(3, 5))
+            time.sleep(10)
+            login_button = driver.find_element(By.XPATH, "//span[contains(text(), 'Log in')]")
+            print("must have located log in button")
+            time.sleep(random.uniform(3, 5))
+            login_button.click()
 
-        login_button = driver.find_element(By.XPATH, "//span[contains(text(), 'Log in')]")
-        print("must have located log in button")
-        time.sleep(random.uniform(3, 5))
-        login_button.click()
-
-        time.sleep(random.uniform(5, 7))
-
+            time.sleep(random.uniform(5, 7))
         if "accounts/login" in driver.current_url:
             print("[❌] Авторизація не виконана. Перевірте логін і пароль.")
         else:
@@ -90,7 +118,7 @@ def login_to_instagram(driver, username, password):
         print(f"[❌] Помилка при вході в Instagram: {e}")
 
 
-def save_cookies(driver, filename="cookies.pkl"):
+def save_cookies(driver, filename="cookie/cookies.pkl"):
     """
     Зберігає cookies у файл.
     """
@@ -99,7 +127,7 @@ def save_cookies(driver, filename="cookies.pkl"):
     print("[✅] Cookies збережено.")
 
 
-def load_cookies(driver, filename=r"C:\Users\GIGABYTE\PycharmProjects\comp_lenguistic\cookies.pkl"):
+def load_cookies(driver, filename=r"cookie/cookies.pkl"):
     """
     Завантажує cookies із файлу.
     """
@@ -312,11 +340,9 @@ def collect_all_hrefs(container_element, target_page, number_of_posts):
             if href:
                 hrefs.append(href.replace(f"/{target_page}", ""))
         print(f"[✅] Зібрано {len(hrefs)} посилань.")
-        return hrefs[0:20]
+        return hrefs[0:number_of_posts]
     except Exception as e:
         print(f"[❌] Помилка при зборі посилань: {e}")
-
-    return hrefs[0:number_of_posts]
 
 
 def load_all_posts(driver, target_page, number_of_posts):
@@ -336,30 +362,34 @@ def load_all_posts(driver, target_page, number_of_posts):
             break
     container_element = driver.find_element(By.XPATH,
                                             "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') and contains(., 'position: relative')]]")
-    return collect_all_hrefs(container_element, target_page,number_of_posts)
+    return collect_all_hrefs(container_element, target_page, number_of_posts)
 
 
 def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
-    user_agent = UserAgent()
-    log = ""  # Initialize an empty string to store log messages
 
+    delete_previos_files()
+    user_agent = UserAgent()
+    log = ""
     driver = setup_driver(user_agent)
     time.sleep(random.uniform(3, 5))
     driver.refresh()
     time.sleep(random.uniform(3, 5))
 
     try:
+        print("[🔍] Відкриваємо Instagram...\n")
         log += "[🔍] Відкриваємо Instagram...\n"  # Add log message
         driver.get("https://www.instagram.com/")
         time.sleep(random.uniform(3, 5))
-
+        print("[🔍] збираємо cookies\n")
         log += "[🔍] збираємо cookies\n"  # Add log message
         load_cookie_success = load_cookies(driver)
         if load_cookie_success:
+            print("[✅] успішно використано попередні Cookie\n")
             log += "[✅] успішно використано попередні Cookie\n"  # Add success log
         else:
+            print("[❌] не вдалось використати попередні Cookie\n")
             log += "[❌] не вдалось використати попередні Cookie\n"  # Add failure log
-
+        print("[🔍] Виконуємо авторизацію...\n")
         log += "[🔍] Виконуємо авторизацію...\n"  # Add log message
         if load_cookie_success:
             for i in load_all_posts(driver, target_page, number_of_posts):
@@ -371,14 +401,22 @@ def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
                 for i in load_all_posts(driver, target_page, number_of_posts):
                     save_comments(driver, i, target_page)
             else:
+                print(f"[❌] ./accounts/login/ in {driver.current_url}\n")
                 log += f"[❌] ./accounts/login/ in {driver.current_url}\n"  # Add failure log
-
+        print("[✅] успішно завантажено всі дані\n")
         log += "[✅] успішно завантажено всі дані\n"  # Add success log
     except Exception as e:
+        print(f"[❌] Помилка: {e}\n")
         log += f"[❌] Помилка: {e}\n"  # Add error log
 
     finally:
         driver.quit()
 
-    return log  # Return the concatenated log messages
-load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
+    return log
+
+
+
+# load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
+
+
+# insert_data_to_database()
