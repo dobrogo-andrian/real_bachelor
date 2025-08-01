@@ -3,6 +3,7 @@ import shutil
 import time
 import random
 import pickle
+import re
 import pandas as pd
 from fake_useragent import UserAgent
 from selenium import webdriver
@@ -13,7 +14,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from static.backend.db_connection import insert_data_to_database
-
 
 
 def delete_previos_files():
@@ -178,20 +178,33 @@ def scroll_and_load_comments(driver):
     time.sleep(random.uniform(3, 5))
     try_press_cancel_button(driver)
     time.sleep(random.uniform(3, 5))
-    click_view_all_comments(driver)
-    time.sleep(random.uniform(3, 5))
-    click_more_button(driver)
-    time.sleep(random.uniform(3, 5))
-    scroll_container = find_scroll_element_by_scroll_properties(driver, "div")
-    while True:
-        try:
-            if not try_scroll_page(driver, scroll_container):
-                print("[ℹ️] Усі коментарі завантажено.")
+    if click_view_all_comments(driver):
+        time.sleep(random.uniform(3, 5))
+        click_more_button(driver)
+        time.sleep(random.uniform(3, 5))
+        scroll_container = find_scroll_element_by_scroll_properties(driver, "div")
+        while True:
+            try:
+                if not try_scroll_page(driver, scroll_container):
+                    print("[ℹ️] Усі коментарі завантажено.")
+                    break
+                time.sleep(random.uniform(2, 4))
+            except Exception as e:
+                print(f"[❌] Помилка під час завантаження коментарів: {e}")
                 break
-            time.sleep(random.uniform(2, 4))
-        except Exception as e:
-            print(f"[❌] Помилка під час завантаження коментарів: {e}")
-            break
+    else:
+        time.sleep(random.uniform(3, 5))
+        scroll_container = find_scroll_element_by_scroll_properties(driver, "div")
+        print("new scrolling scenario")
+        while True:
+            try:
+                if not try_scroll_page(driver, scroll_container):
+                    print("[ℹ️] Усі коментарі завантажено.")
+                    break
+                time.sleep(random.uniform(2, 4))
+            except Exception as e:
+                print(f"[❌] Помилка під час завантаження коментарів: {e}")
+                break
 
 
 def try_scroll_page(driver, scroll_container, limit_scrolling=False):
@@ -204,7 +217,7 @@ def try_scroll_page(driver, scroll_container, limit_scrolling=False):
         time.sleep(random.uniform(2, 4))
         i = 0
         while True:
-            driver.execute_script("arguments[0].scrollTo(0, arguments[0].scrollHeight);", scroll_container)
+            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", scroll_container)
             time.sleep(random.uniform(2, 4))
             new_height = driver.execute_script("return arguments[0].scrollHeight", scroll_container)
             i += 1
@@ -217,6 +230,115 @@ def try_scroll_page(driver, scroll_container, limit_scrolling=False):
         print(f"[❌] Помилка під час скролінгу: {e}")
         return False
 
+# 1 like
+# todo: here
+def collect_comments_and_likes(driver):
+    """
+    Збирає всі коментарі, час їх публікації, та кількість позначок «Подобається» зі сторінки.
+    Об'єднує дані з двох різних джерел в один набір даних.
+    """
+    import re
+    from selenium.webdriver.common.by import By
+
+    combined_data = []  # Combined dataset to store tuples of (comment_text, comment_time, likes_count)
+
+    try:
+        # PART 1: Collect data based on comment text elements
+        print("[🔍] Збір коментарів з першого підходу...")
+        comment_xpath = ".//div[@style='display: inline;']/span[@dir='auto']"
+        comment_elements = driver.find_elements(By.XPATH, comment_xpath)
+
+        for elem in comment_elements:
+            try:
+                # Extract the text from the comment element
+                comment_text = elem.text.strip()
+                print("Comment text (Approach 1):", comment_text)
+
+                # Extract the time and likes count from the parent container
+                parent_container = elem.find_element(By.XPATH, "..")  # Go to the parent container
+                try:
+                    time_element = parent_container.find_element(By.TAG_NAME, "time")
+                    comment_time = time_element.get_attribute("datetime") if time_element else None
+                except Exception:
+                    comment_time = None
+
+                print("Time (Approach 1):", comment_time)
+
+                # Extract likes count if available
+                likes_count = 0
+                likes_elements = parent_container.find_elements(
+                    By.XPATH,
+                    ".//span[contains(text(), 'Позначки «Подобається»')] | .//span[contains(text(), 'вподобання')]"
+                )
+                for likes_elem in likes_elements:
+                    likes_text = likes_elem.text.strip()
+                    if "вподобання" in likes_text:
+                        likes_count += 1
+                    else:
+                        match = re.search(r"(\d+)", likes_text)
+                        if match:
+                            likes_count += int(match.group(1))
+
+                print("Likes count (Approach 1):", likes_count)
+
+                # Append the collected data to the combined dataset
+                combined_data.append((comment_text, comment_time, likes_count))
+            except Exception as e:
+                print(f"[❌] Помилка при обробці коментаря (Approach 1): {e}")
+
+        # PART 2: Collect data based on <time> elements
+        print("[🔍] Збір коментарів з другого підходу...")
+        time_elements = driver.find_elements(By.XPATH, "//time[@datetime]")
+
+        for time_element in time_elements:
+            try:
+                # Extract the time value
+                comment_time = time_element.get_attribute("datetime")
+                print("Time (Approach 2):", comment_time)
+
+                # Navigate to the parent container of the <time> element
+                parent_container = time_element.find_element(By.XPATH, "./ancestor::div[1]")
+
+                # Extract the comment text within the parent container
+                try:
+                    comment_text_element = parent_container.find_element(By.XPATH, ".//span[@dir='auto']")
+                    comment_text = comment_text_element.text.strip()
+                except Exception:
+                    comment_text = None
+
+                print("Comment text (Approach 2):", comment_text)
+
+                # Extract likes count if available
+                likes_count = 0
+                likes_elements = parent_container.find_elements(
+                    By.XPATH,
+                    ".//span[contains(text(), 'Позначки «Подобається»')] | .//span[contains(text(), 'вподобання')]"
+                )
+                for likes_elem in likes_elements:
+                    likes_text = likes_elem.text.strip()
+                    if "вподобання" in likes_text:
+                        likes_count += 1
+                    else:
+                        match = re.search(r"(\d+)", likes_text)
+                        if match:
+                            likes_count += int(match.group(1))
+
+                print("Likes count (Approach 2):", likes_count)
+
+                # Append the collected data to the combined dataset
+                combined_data.append((comment_text, comment_time, likes_count))
+            except Exception as e:
+                print(f"[❌] Помилка при обробці коментаря (Approach 2): {e}")
+
+        print(f"[✅] Зібрано {len(combined_data)} коментарів.")
+        for idx, data in enumerate(combined_data):
+            print(f"[{idx}] Comment: {data[0]}, Time: {data[1]}, Likes: {data[2]}")
+
+    except Exception as e:
+        print(f"[❌] Загальна помилка при зборі даних: {e}")
+
+    return combined_data
+
 
 def collect_comments(driver):
     """
@@ -225,7 +347,6 @@ def collect_comments(driver):
     comments = []
     try:
         comment_xpath = ".//div[@style='display: inline;']/span[@dir='auto']"
-
         comment_elements = driver.find_elements(By.XPATH, comment_xpath)
         for elem in comment_elements:
             text = elem.text.strip()
@@ -256,8 +377,10 @@ def click_view_all_comments(driver):
         )
         view_all_button.click()
         print("[✅] Кнопка 'View all comments' натиснута.")
-    except Exception as e:
-        print(f"[❌] Помилка: Кнопка 'View all comments' не знайдена або не натиснута. Деталі: {e}")
+        return True
+    except Exception:
+        print(f"Кнопку 'View all comments' не натиснуто.")
+        return False
 
 
 def click_more_button(driver):
@@ -291,10 +414,11 @@ def save_comments(driver, POST_URL, target_page):
     scroll_and_load_comments(driver)
 
     print("[📥] Збираємо коментарі...")
-    comments = collect_comments(driver)
-
-    print(f"[✅] Зібрано {len(comments)} коментарів. Зберігаємо у файл...")
-    df = pd.DataFrame(comments, columns=["Comment"])
+    comments_data = collect_comments_and_likes(driver)
+    print(comments_data)
+    print(f"[✅] Зібрано {len(comments_data)} коментарів. Зберігаємо у файл...")
+    df = pd.DataFrame(comments_data, columns=["Comment", "Time", "Likes"])
+    print(f"df: {df}")
     df.to_csv(get_next_filename(target_page), index=False, encoding="utf-8-sig")
 
     print(f"[🎉] Успішно збережено в файл: {get_next_filename(target_page)}")
@@ -366,7 +490,6 @@ def load_all_posts(driver, target_page, number_of_posts):
 
 
 def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
-
     delete_previos_files()
     user_agent = UserAgent()
     log = ""
@@ -415,8 +538,6 @@ def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
     return log
 
 
-
-# load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
-
+load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
 
 # insert_data_to_database()

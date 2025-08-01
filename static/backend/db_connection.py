@@ -50,12 +50,14 @@ def fetch_user(username):
     return cursor.fetchone()
 
 
-def insert_data_to_database():
+def insert_data_to_database(df):
     # Connect to the database
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
         # Check if the username or email already exists
         cursor.execute('SELECT * FROM Users WHERE Username = ? OR Email = ?', (username, email))
         existing_user = cursor.fetchone()
@@ -64,9 +66,9 @@ def insert_data_to_database():
 
         # Insert new user into the database
         cursor.execute('''
-                   INSERT INTO Users (Username, PasswordHash, Email)
-                   VALUES (?, ?, ?)
-               ''', (username, password_hash, email))
+            INSERT INTO Users (Username, PasswordHash, Email)
+            VALUES (?, ?, ?)
+        ''', (username, password, email))
         conn.commit()
 
         # Redirect to the login page after successful signup
