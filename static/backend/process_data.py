@@ -3,6 +3,7 @@ from langdetect import detect_langs
 import re
 import unicodedata
 import os
+from static.backend.common_utils import get_next_filename, extract_sort_key
 
 
 def normalize_unicode(text):
@@ -102,43 +103,6 @@ def process_csv(input_csv, output_csv):
 
     filtered_df.to_csv(output_csv, index=False)
     print(f"Файл успішно оброблено! Результат збережено в {output_csv}")
-
-
-def get_next_filename(base_filename, folder):
-    """
-    Генерує унікальну назву файлу, додаючи +1 до номера.
-    """
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-    files = os.listdir(folder)
-
-    matching_files = [f for f in files if f.startswith(base_filename) and f.endswith(".csv")]
-
-    max_number = 0
-    for file in matching_files:
-        try:
-            number = int(file.replace(base_filename, "").replace(".csv", "").strip("_"))
-            if number > max_number:
-                max_number = number
-        except ValueError:
-            continue
-
-    next_number = max_number + 1
-    return os.path.join(folder, f"{base_filename}_{next_number}.csv")
-
-
-def extract_sort_key(filename):
-    name_part = os.path.splitext(filename)[0]
-    match = re.match(r"(.*?)(\d+)?$", name_part)
-    if match:
-        prefix = match.group(1)
-        number = int(match.group(2)) if match.group(2) else -1
-        return (prefix.lower(), number)
-    return (name_part.lower(), -1)
-
-
-
 
 
 def process_data( input_folder= "unprocessed_data/comments1",

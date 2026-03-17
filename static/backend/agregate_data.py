@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-import re
+from static.backend.common_utils import get_next_filename, extract_sort_key
 
 
 def collect_and_prepare_data(input_folder, output_file):
@@ -13,7 +13,7 @@ def collect_and_prepare_data(input_folder, output_file):
     combined_data = []
 
     input_files = [f for f in os.listdir(input_folder) if f.endswith('.csv')]
-    input_files = sorted(input_files, key=lambda x: int(re.search(r'\d+', x).group()))
+    input_files = sorted(input_files, key=extract_sort_key)
 
     for input_file in input_files:
         file_id = int(input_file.split('_')[-1].split('.')[0])
@@ -33,30 +33,6 @@ def collect_and_prepare_data(input_folder, output_file):
 
     combined_df.to_csv(output_file, index=False)
     print(f"Об'єднаний датасет збережено в: {output_file}")
-
-
-def get_next_filename(base_filename, folder):
-    """
-    Генерує унікальну назву файлу, додаючи +1 до номера.
-    """
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-    files = os.listdir(folder)
-
-    matching_files = [f for f in files if f.startswith(base_filename) and f.endswith(".csv")]
-
-    max_number = 0
-    for file in matching_files:
-        try:
-            number = int(file.replace(base_filename, "").replace(".csv", "").strip("_"))
-            if number > max_number:
-                max_number = number
-        except ValueError:
-            continue
-
-    next_number = max_number + 1
-    return os.path.join(folder, f"{base_filename}_{next_number}.csv")
 
 
 def aggregate_data(input_folder="sentiment_analysis\\additional_task\\politics",

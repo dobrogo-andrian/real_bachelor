@@ -19,20 +19,17 @@ def insert_new_user(username, email, password):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Check if the username or email already exists
         cursor.execute('SELECT * FROM Users WHERE Username = ? OR Email = ?', (username, email))
         existing_user = cursor.fetchone()
         if existing_user:
             return jsonify({'error': 'Username or email already exists'}), 409
 
-        # Insert new user into the database
         cursor.execute('''
             INSERT INTO Users (Username, PasswordHash, Email)
             VALUES (?, ?, ?)
         ''', (username, password, email))
         conn.commit()
 
-        # Redirect to the login page after successful signup
         return jsonify({'message': 'User created successfully', 'redirect': '/login'}), 201
     except Exception as e:
         conn.rollback()
@@ -51,27 +48,23 @@ def fetch_user(username):
 
 
 def insert_data_to_database(df):
-    # Connect to the database
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Check if the username or email already exists
         cursor.execute('SELECT * FROM Users WHERE Username = ? OR Email = ?', (username, email))
         existing_user = cursor.fetchone()
         if existing_user:
             return jsonify({'error': 'Username or email already exists'}), 409
 
-        # Insert new user into the database
         cursor.execute('''
             INSERT INTO Users (Username, PasswordHash, Email)
             VALUES (?, ?, ?)
         ''', (username, password, email))
         conn.commit()
 
-        # Redirect to the login page after successful signup
         return jsonify({'message': 'User created successfully', 'redirect': '/login'}), 201
     except Exception as e:
         conn.rollback()

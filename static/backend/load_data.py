@@ -3,7 +3,6 @@ import shutil
 import time
 import random
 import pickle
-import re
 import pandas as pd
 from fake_useragent import UserAgent
 from selenium import webdriver
@@ -13,58 +12,31 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
-from static.backend.db_connection import insert_data_to_database
+from static.backend.common_utils import get_next_filename
 
 
 def delete_previos_files():
-    relative_directory = 'unprocessed_data'  # Replace with your relative directory path
+    relative_directory = 'unprocessed_data'
 
     if not os.path.exists(relative_directory):
         os.makedirs(relative_directory, exist_ok=True)
         return
 
-    # List all items in the relative directory
     for filename in os.listdir(relative_directory):
         file_path = os.path.join(relative_directory, filename)
 
-        # Check if it's a file
         if os.path.isfile(file_path):
             try:
-                os.remove(file_path)  # Delete the file
+                os.remove(file_path)
                 print(f"Deleted file: {file_path}")
             except Exception as e:
                 print(f"Error deleting file {file_path}: {e}")
-        # Check if it's a directory
         elif os.path.isdir(file_path):
             try:
-                shutil.rmtree(file_path)  # Delete the directory and its contents
+                shutil.rmtree(file_path)
                 print(f"Deleted directory: {file_path}")
             except Exception as e:
                 print(f"Error deleting directory {file_path}: {e}")
-
-
-def get_next_filename(base_filename, folder="unprocessed_data/comments1"):
-    """
-       ,  +1  .
-    """
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-    files = os.listdir(folder)
-
-    matching_files = [f for f in files if f.startswith(base_filename) and f.endswith(".csv")]
-
-    max_number = 0
-    for file in matching_files:
-        try:
-            number = int(file.replace(base_filename, "").replace(".csv", "").strip("_"))
-            if number > max_number:
-                max_number = number
-        except ValueError:
-            continue
-
-    next_number = max_number + 1
-    return os.path.join(folder, f"{base_filename}_{next_number}.csv")
 
 
 def setup_driver(user_agent):
@@ -75,7 +47,6 @@ def setup_driver(user_agent):
     options.add_argument("--disable-notifications")
     options.add_argument("--lang=en")
     options.add_argument("--start-maximized")
-    # Reduce Chrome background noise and internal telemetry logs
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-sync")
     options.add_argument("--disable-default-apps")
@@ -85,14 +56,12 @@ def setup_driver(user_agent):
     options.add_argument("--disable-logging")
     options.add_argument("--log-level=3")
     options.add_experimental_option("excludeSwitches", ["enable-logging"])
-    #       
     # options.add_argument("--headless")
 
     driver_path = os.getenv("CHROMEDRIVER_PATH")
     if driver_path:
         driver = webdriver.Chrome(service=Service(driver_path), options=options)
     else:
-        # Let Selenium Manager resolve a matching driver for the installed Chrome.
         driver = webdriver.Chrome(options=options)
 
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -191,9 +160,6 @@ def load_cookies(driver, filename=r"cookie/cookies.pkl"):
 
 
 def scroll_and_load_comments(driver):
-    """
-         .
-    """
     print("[INFO] Loading comments...")
     time.sleep(random.uniform(3, 5))
     try_press_cancel_button(driver)
@@ -217,6 +183,10 @@ def scroll_and_load_comments(driver):
         print("[INFO] All comments loaded.")
     else:
         time.sleep(random.uniform(3, 5))
+        if click_reels_comment_button(driver):
+            time.sleep(random.uniform(3, 5))
+            click_more_button(driver)
+            time.sleep(random.uniform(3, 5))
         scroll_container = find_scroll_element_by_scroll_properties(driver, "div")
         print("[INFO] Fallback scrolling mode.")
         if not scroll_container:
@@ -234,9 +204,6 @@ def scroll_and_load_comments(driver):
 
 
 def try_scroll_page(driver, scroll_container, limit_scrolling=False):
-    """
-           .
-    """
     time.sleep(random.uniform(3.5, 5.5))
     try:
         last_height = driver.execute_script("return arguments[0].scrollHeight", scroll_container)
@@ -256,8 +223,6 @@ def try_scroll_page(driver, scroll_container, limit_scrolling=False):
         print(f"[ERROR] Scroll error: {e}")
         return False
 
-# 1 like
-# todo: here
 def collect_comments_and_likes(driver):
     """
     Collect comments (text + likes) and attach times by index from the <time> list.
@@ -265,9 +230,52 @@ def collect_comments_and_likes(driver):
     import re
     from selenium.webdriver.common.by import By
 
+    def parse_like_text(text):
+        if not text:
+            return 0
+        match = re.search(r"(\d[\d,]*)", text)
+        if match:
+            return int(match.group(1).replace(",", ""))
+        if "like" in text.lower():
+            return 1
+        return 0
+
+    def max_like_from_texts(texts):
+        counts = [parse_like_text(t) for t in texts if t]
+        return max(counts) if counts else 0
+    
+    def pick_container(seed_elem):
+        container_xpaths = [
+            "ancestor::div[.//time[@datetime] and .//span[contains(translate(., 'LIKE', 'like'), 'like')]][1]",
+            "ancestor::div[.//time[@datetime] and .//span[normalize-space()='Reply']][1]",
+            "ancestor::div[.//time[@datetime]][1]",
+            "ancestor::li[1]",
+            "ancestor::div[@role='listitem'][1]",
+            "..",
+        ]
+        for cx in container_xpaths:
+            try:
+                container = seed_elem.find_element(By.XPATH, cx)
+                if container:
+                    return container
+            except Exception:
+                continue
+        return seed_elem
+
     combined_data = []
+    seen = set()
     try:
-        # Approach 1: comments and likes
+        def add_record(comment_text, time_val, likes_span):
+            key = (comment_text, time_val)
+            if key in seen:
+                return
+            seen.add(key)
+            combined_data.append({
+                "comment": comment_text,
+                "time": time_val,
+                "likes": likes_span,
+            })
+
         comment_xpath = ".//div[@style='display: inline;']/span[@dir='auto']"
         comment_elements = driver.find_elements(By.XPATH, comment_xpath)
 
@@ -277,53 +285,81 @@ def collect_comments_and_likes(driver):
                 if not comment_text:
                     continue
 
-                parent_container = elem.find_element(By.XPATH, "..")
-                likes_count = 0
-                likes_elements = parent_container.find_elements(
-                    By.XPATH,
-                    ".//span[contains(text(), 'like')]"
-                )
-                for likes_elem in likes_elements:
-                    likes_text = likes_elem.text.strip()
-                    if "like" in likes_text.lower():
-                        match = re.search(r"(\\d+)", likes_text)
-                        if match:
-                            likes_count += int(match.group(1))
-                        else:
-                            likes_count += 1
+                container = pick_container(elem)
 
-                combined_data.append({"comment": comment_text, "time": None, "likes": likes_count})
+                span_texts = []
+                for span in container.find_elements(By.XPATH, ".//span"):
+                    t = span.text.strip()
+                    if "like" in t.lower():
+                        span_texts.append(t)
+
+                likes_span = max_like_from_texts(span_texts)
+
+                time_val = None
+                try:
+                    time_val = container.find_element(By.XPATH, ".//time[@datetime]").get_attribute("datetime")
+                except Exception:
+                    time_val = None
+
+                add_record(comment_text, time_val, likes_span)
             except Exception as e:
                 print(f"[ERROR] Comment parse failed: {e}")
 
-        # Approach 2: times only
-        time_elements = driver.find_elements(By.XPATH, "//time[@datetime]")
-        times = [t.get_attribute("datetime") for t in time_elements]
+        if not combined_data:
+            time_elements = driver.find_elements(By.XPATH, "//time[@datetime]")
+            for time_elem in time_elements:
+                try:
+                    container = pick_container(time_elem)
+                    comment_text = ""
 
-        for i in range(min(len(combined_data), len(times))):
-            combined_data[i]["time"] = times[i]
+                    try:
+                        time_block = time_elem.find_element(By.XPATH, "ancestor::div[.//time[@datetime]][1]")
+                        comment_blocks = time_block.find_elements(
+                            By.XPATH,
+                            "following-sibling::div[.//span[@dir='auto']][1]"
+                        )
+                        if comment_blocks:
+                            comment_text = comment_blocks[0].text.strip()
+                    except Exception:
+                        comment_text = ""
 
-        return [(d["comment"], d["time"], d["likes"]) for d in combined_data]
+                    if not comment_text:
+                        continue
+
+                    span_texts = []
+                    for span in container.find_elements(By.XPATH, ".//span"):
+                        t = span.text.strip()
+                        if "like" in t.lower():
+                            span_texts.append(t)
+
+                    likes_span = max_like_from_texts(span_texts)
+
+                    time_val = time_elem.get_attribute("datetime")
+                    add_record(comment_text, time_val, likes_span)
+                except Exception:
+                    continue
+
+        if any(d["time"] is None for d in combined_data):
+            time_elements = driver.find_elements(By.XPATH, "//time[@datetime]")
+            times = [t.get_attribute("datetime") for t in time_elements]
+            ti = 0
+            for d in combined_data:
+                if d["time"] is None and ti < len(times):
+                    d["time"] = times[ti]
+                    ti += 1
+
+        return [
+            (d["comment"], d["time"], d["likes"])
+            for d in combined_data
+        ]
 
     except Exception as e:
         print(f"[ERROR] Collect failed: {e}")
-        return [(d["comment"], d["time"], d["likes"]) for d in combined_data]
-def collect_comments(driver):
-    """
-        .
-    """
-    comments = []
-    try:
-        comment_xpath = ".//div[@style='display: inline;']/span[@dir='auto']"
-        comment_elements = driver.find_elements(By.XPATH, comment_xpath)
-        for elem in comment_elements:
-            text = elem.text.strip()
-            if text:
-                comments.append(text)
-        print(f"[INFO] Collected {len(comments)} comments.")
-    except Exception as e:
-        print(f"[ERROR] Comment collection error: {e}")
-    return comments
+        return [
+            (d["comment"], d["time"], d["likes"])
+            for d in combined_data
+        ]
+
 
 
 def try_press_cancel_button(driver):
@@ -348,6 +384,47 @@ def click_view_all_comments(driver):
         return True
     except Exception:
         print("[INFO] 'View all comments' not found.")
+        return False
+
+
+def click_reels_comment_button(driver):
+    """
+    Reels can hide comments behind a comment button (speech bubble icon).
+    Try to locate and click it when "View all comments" is absent.
+    """
+    try:
+        xpaths = [
+            "//div[@role='button'][.//svg[@aria-label='Comment']]",
+            "//div[@role='button'][.//title[normalize-space()='Comment']]",
+            "//svg[@aria-label='Comment']/ancestor::div[@role='button'][1]",
+            "//title[normalize-space()='Comment']/ancestor::div[@role='button'][1]",
+        ]
+
+        for xp in xpaths:
+            try:
+                comment_button = WebDriverWait(driver, 3).until(
+                    EC.element_to_be_clickable((By.XPATH, xp))
+                )
+                comment_button.click()
+                print("[INFO] Clicked comment button (reels).")
+                return True
+            except Exception:
+                continue
+
+        for xp in xpaths:
+            try:
+                elems = driver.find_elements(By.XPATH, xp)
+                if elems:
+                    elems[0].click()
+                    print("[INFO] Clicked comment button (reels).")
+                    return True
+            except Exception:
+                continue
+
+        print("[INFO] Comment button (reels) not found.")
+        return False
+    except Exception:
+        print("[INFO] Comment button (reels) not found.")
         return False
 
 
@@ -387,16 +464,13 @@ def save_comments(driver, POST_URL, target_page):
     print(f"[INFO] Collected {len(comments_data)} comments. Saving CSV...")
     df = pd.DataFrame(comments_data, columns=["Comment", "Time", "Likes"])
     print(f"df: {df}")
-    output_path = get_next_filename(target_page)
+    output_path = get_next_filename(target_page, "unprocessed_data/comments1")
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
     print(f"[INFO] Saved CSV: {output_path}")
 
 
 def find_scroll_elements_by_scroll_properties(driver, element_owner):
-    """
-      ,   .
-    """
     time.sleep(random.uniform(2, 4))
     try_press_cancel_button(driver)
     time.sleep(random.uniform(2, 4))
@@ -431,12 +505,6 @@ def find_scroll_element_by_scroll_properties(driver, element_owner):
 
 
 def collect_all_hrefs(container_element, target_page, number_of_posts):
-    """
-       href   <a>   .
-
-    :param container_element:   <div>,     <a>
-    :return:   href
-    """
     hrefs = []
     try:
         anchor_elements = container_element.find_elements(By.TAG_NAME, "a")
@@ -521,7 +589,6 @@ def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
 
 if __name__ == "__main__":
     load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
-
     # insert_data_to_database()
 
 

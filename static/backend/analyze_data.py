@@ -1,7 +1,7 @@
 from transformers import pipeline
 import pandas as pd
 import os
-import re
+from static.backend.common_utils import get_next_filename, extract_sort_key
 
 
 def load_models():
@@ -27,11 +27,9 @@ def analyze_sentiment(comment, language, models):
     :return: оцінка тональності ('positive', 'neutral', 'negative')
     """
     if language == "symbols_only":
-        # Використовуємо модель для аналізу емодзі та символів
         try:
             result = models[language](comment)
-            label = result[0]['label']  # Наприклад, 'label_0', 'label_1', 'label_2'
-            # Перетворюємо мітки на текстові оцінки
+            label = result[0]['label']
             if label == "LABEL_0" or label == "label_0":
                 return "negative"
             elif label == "LABEL_1" or label == "label_1":
@@ -43,12 +41,11 @@ def analyze_sentiment(comment, language, models):
             return "neutral"
 
     if language not in models:
-        return "neutral"  # Якщо модель для мови не завантажена, повертаємо нейтральну оцінку
+        return "neutral"
 
     try:
         result = models[language](comment)
-        label = result[0]['label']  # Наприклад, 'label_0', 'label_1', 'label_2'
-        # Перетворюємо мітки на текстові оцінки
+        label = result[0]['label']
         if label == "LABEL_0" or label == "label_0" or str.lower(label) == "negative":
             return "negative"
         elif label == "LABEL_1" or label == "label_1" or str.lower(label) == "neutral":
@@ -66,10 +63,8 @@ def process_sentiment_analysis(input_csv, output_csv):
     :param input_csv: шлях до вхідного CSV-файлу
     :param output_csv: шлях до вихідного CSV-файлу
     """
-    # Завантажуємо CSV-файл
     df = pd.read_csv(input_csv)
 
-    # Перевіряємо, чи є необхідні стовпці
     if 'Filtered_Comment' not in df.columns or 'Main_Language' not in df.columns:
         raise ValueError("Вхідний файл повинен містити стовпці 'Filtered_Comment' і 'Main_Language'.")
 
@@ -86,37 +81,13 @@ def process_sentiment_analysis(input_csv, output_csv):
     print(f"Файл успішно оброблено! Результат збережено в {output_csv}")
 
 
-def get_next_filename(base_filename, folder):
-    """
-    Генерує унікальну назву файлу, додаючи +1 до номера.
-    """
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-    files = os.listdir(folder)
-
-    matching_files = [f for f in files if f.startswith(base_filename) and f.endswith(".csv")]
-
-    max_number = 0
-    for file in matching_files:
-        try:
-            number = int(file.replace(base_filename, "").replace(".csv", "").strip("_"))
-            if number > max_number:
-                max_number = number
-        except ValueError:
-            continue
-
-    next_number = max_number + 1
-    return os.path.join(folder, f"{base_filename}_{next_number}.csv")
-
-
 def analyze_data(input_folder="language_marked_comments/additional_task",
                  output_folder="sentiment_analysis/additional_task"):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
     input_files = [f for f in os.listdir(input_folder) if f.endswith('.csv')]
-    input_files = sorted(input_files, key=lambda x: int(re.search(r'\d+', x).group()))
+    input_files = sorted(input_files, key=extract_sort_key)
     for input_file in input_files:
         try:
             input_csv_path = os.path.join(input_folder, input_file)
