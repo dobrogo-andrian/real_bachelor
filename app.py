@@ -24,6 +24,11 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 logger.debug("Application started.")
+
+# Reduce noisy third-party logs
+logging.getLogger("selenium").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 CORS(app)
 jwt = JWTManager(app)
 

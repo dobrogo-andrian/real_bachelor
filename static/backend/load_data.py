@@ -19,6 +19,10 @@ from static.backend.db_connection import insert_data_to_database
 def delete_previos_files():
     relative_directory = 'unprocessed_data'  # Replace with your relative directory path
 
+    if not os.path.exists(relative_directory):
+        os.makedirs(relative_directory, exist_ok=True)
+        return
+
     # List all items in the relative directory
     for filename in os.listdir(relative_directory):
         file_path = os.path.join(relative_directory, filename)
@@ -41,7 +45,7 @@ def delete_previos_files():
 
 def get_next_filename(base_filename, folder="unprocessed_data/comments1"):
     """
-    Генерує унікальну назву файлу, додаючи +1 до номера.
+       ,  +1  .
     """
     if not os.path.exists(folder):
         os.makedirs(folder)
@@ -71,10 +75,25 @@ def setup_driver(user_agent):
     options.add_argument("--disable-notifications")
     options.add_argument("--lang=en")
     options.add_argument("--start-maximized")
-    # режим збирання коментарів без відкритого вікна браузера
+    # Reduce Chrome background noise and internal telemetry logs
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-sync")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-component-update")
+    options.add_argument("--no-first-run")
+    options.add_argument("--no-default-browser-check")
+    options.add_argument("--disable-logging")
+    options.add_argument("--log-level=3")
+    options.add_experimental_option("excludeSwitches", ["enable-logging"])
+    #       
     # options.add_argument("--headless")
 
-    driver = webdriver.Chrome(service=Service(r"C:\chromedriver\chromedriver-win64\chromedriver.exe"), options=options)
+    driver_path = os.getenv("CHROMEDRIVER_PATH")
+    if driver_path:
+        driver = webdriver.Chrome(service=Service(driver_path), options=options)
+    else:
+        # Let Selenium Manager resolve a matching driver for the installed Chrome.
+        driver = webdriver.Chrome(options=options)
 
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": """
@@ -88,7 +107,7 @@ def setup_driver(user_agent):
 
 def login_to_instagram(driver, username, password):
     """
-    Виконує авторизацію в Instagram.
+       Instagram.
     """
     try:
         driver.get("https://www.instagram.com/accounts/login/")
@@ -111,70 +130,71 @@ def login_to_instagram(driver, username, password):
 
             time.sleep(random.uniform(5, 7))
         if "accounts/login" in driver.current_url:
-            print("[❌] Авторизація не виконана. Перевірте логін і пароль.")
+            print("[WARN] Login failed or still on login page.")
         else:
-            print("[✅] Авторизація виконана успішно.")
+            print("[INFO] Login successful.")
     except Exception as e:
-        print(f"[❌] Помилка при вході в Instagram: {e}")
+        print(f"[ERROR] Instagram login error: {e}")
 
 
 def save_cookies(driver, filename="cookie/cookies.pkl"):
     """
-    Зберігає cookies у файл.
+     cookies  .
     """
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, "wb") as file:
         pickle.dump(driver.get_cookies(), file)
-    print("[✅] Cookies збережено.")
+    print("[INFO] Cookies saved.")
 
 
 def load_cookies(driver, filename=r"cookie/cookies.pkl"):
     """
-    Завантажує cookies із файлу.
+     cookies  .
     """
     try:
         if not os.path.exists(filename):
-            print("[❌] Cookies файл не існує. Виконуємо новий вхід.")
+            print("[INFO] Cookies file not found. Proceeding with fresh login.")
             return False
 
         if os.path.getsize(filename) == 0:
-            print("[❌] Cookies файл порожній. Виконуємо новий вхід.")
+            print("[INFO] Cookies file is empty. Proceeding with fresh login.")
             return False
 
         with open(filename, "rb") as file:
             cookies = pickle.load(file)
 
         if not cookies:
-            print("[❌] Cookies файл порожній. Виконуємо новий вхід.")
+            print("[INFO] Cookies file has no data. Proceeding with fresh login.")
             return False
 
         for cookie in cookies:
             try:
                 driver.add_cookie(cookie)
             except Exception as e:
-                print(f"[❌] Помилка додавання cookie: {cookie}, {e}")
+                print(f"[WARN] Failed to add cookie {cookie}: {e}")
                 return False
 
-        print("[✅] Cookies завантажено.")
+        print("[INFO] Cookies loaded.")
         return True
 
     except FileNotFoundError:
-        print("[❌] Cookies файл не знайдено. Виконуємо новий вхід.")
+        print("[INFO] Cookies file not found. Proceeding with fresh login.")
         return False
 
     except pickle.UnpicklingError:
-        print("[❌] Cookies файл пошкоджений або некоректний. Виконуємо новий вхід.")
+        print("[WARN] Cookies file is invalid or corrupted. Proceeding with fresh login.")
         return False
 
     except Exception as e:
-        print(f"[❌] Cookies якась проблема: {e}")
+        print(f"[ERROR] Cookies error: {e}")
         return False
 
 
 def scroll_and_load_comments(driver):
     """
-    Завантажує всі коментарі за допомогою скролінгу.
+         .
     """
-    print("[ℹ️] Починаємо завантаження коментарів...")
+    print("[INFO] Loading comments...")
     time.sleep(random.uniform(3, 5))
     try_press_cancel_button(driver)
     time.sleep(random.uniform(3, 5))
@@ -183,42 +203,48 @@ def scroll_and_load_comments(driver):
         click_more_button(driver)
         time.sleep(random.uniform(3, 5))
         scroll_container = find_scroll_element_by_scroll_properties(driver, "div")
-        while True:
-            try:
-                if not try_scroll_page(driver, scroll_container):
-                    print("[ℹ️] Усі коментарі завантажено.")
+        if not scroll_container:
+            print("[WARN] No scrollable comment containers found.")
+        else:
+            while True:
+                try:
+                    if not try_scroll_page(driver, scroll_container):
+                        break
+                    time.sleep(random.uniform(2, 4))
+                except Exception as e:
+                    print(f"[ERROR] Error while loading comments: {e}")
                     break
-                time.sleep(random.uniform(2, 4))
-            except Exception as e:
-                print(f"[❌] Помилка під час завантаження коментарів: {e}")
-                break
+        print("[INFO] All comments loaded.")
     else:
         time.sleep(random.uniform(3, 5))
         scroll_container = find_scroll_element_by_scroll_properties(driver, "div")
-        print("new scrolling scenario")
-        while True:
-            try:
-                if not try_scroll_page(driver, scroll_container):
-                    print("[ℹ️] Усі коментарі завантажено.")
+        print("[INFO] Fallback scrolling mode.")
+        if not scroll_container:
+            print("[WARN] No scrollable comment containers found.")
+        else:
+            while True:
+                try:
+                    if not try_scroll_page(driver, scroll_container):
+                        break
+                    time.sleep(random.uniform(2, 4))
+                except Exception as e:
+                    print(f"[ERROR] Error while loading comments: {e}")
                     break
-                time.sleep(random.uniform(2, 4))
-            except Exception as e:
-                print(f"[❌] Помилка під час завантаження коментарів: {e}")
-                break
+        print("[INFO] All comments loaded.")
 
 
 def try_scroll_page(driver, scroll_container, limit_scrolling=False):
     """
-    Скролить область коментарів вниз для завантаження нових коментарів.
+           .
     """
-    time.sleep(random.uniform(2, 4))
+    time.sleep(random.uniform(3.5, 5.5))
     try:
         last_height = driver.execute_script("return arguments[0].scrollHeight", scroll_container)
-        time.sleep(random.uniform(2, 4))
+        time.sleep(random.uniform(3.5, 5.5))
         i = 0
         while True:
             driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", scroll_container)
-            time.sleep(random.uniform(2, 4))
+            time.sleep(random.uniform(3.5, 5.5))
             new_height = driver.execute_script("return arguments[0].scrollHeight", scroll_container)
             i += 1
             if new_height == last_height:
@@ -227,122 +253,64 @@ def try_scroll_page(driver, scroll_container, limit_scrolling=False):
             if i >= 10 and limit_scrolling:
                 return False
     except Exception as e:
-        print(f"[❌] Помилка під час скролінгу: {e}")
+        print(f"[ERROR] Scroll error: {e}")
         return False
 
 # 1 like
 # todo: here
 def collect_comments_and_likes(driver):
     """
-    Збирає всі коментарі, час їх публікації, та кількість позначок «Подобається» зі сторінки.
-    Об'єднує дані з двох різних джерел в один набір даних.
+    Collect comments (text + likes) and attach times by index from the <time> list.
     """
     import re
     from selenium.webdriver.common.by import By
 
-    combined_data = []  # Combined dataset to store tuples of (comment_text, comment_time, likes_count)
-
+    combined_data = []
     try:
-        # PART 1: Collect data based on comment text elements
-        print("[🔍] Збір коментарів з першого підходу...")
+        # Approach 1: comments and likes
         comment_xpath = ".//div[@style='display: inline;']/span[@dir='auto']"
         comment_elements = driver.find_elements(By.XPATH, comment_xpath)
 
         for elem in comment_elements:
             try:
-                # Extract the text from the comment element
                 comment_text = elem.text.strip()
-                print("Comment text (Approach 1):", comment_text)
+                if not comment_text:
+                    continue
 
-                # Extract the time and likes count from the parent container
-                parent_container = elem.find_element(By.XPATH, "..")  # Go to the parent container
-                try:
-                    time_element = parent_container.find_element(By.TAG_NAME, "time")
-                    comment_time = time_element.get_attribute("datetime") if time_element else None
-                except Exception:
-                    comment_time = None
-
-                print("Time (Approach 1):", comment_time)
-
-                # Extract likes count if available
+                parent_container = elem.find_element(By.XPATH, "..")
                 likes_count = 0
                 likes_elements = parent_container.find_elements(
                     By.XPATH,
-                    ".//span[contains(text(), 'Позначки «Подобається»')] | .//span[contains(text(), 'вподобання')]"
+                    ".//span[contains(text(), 'like')]"
                 )
                 for likes_elem in likes_elements:
                     likes_text = likes_elem.text.strip()
-                    if "вподобання" in likes_text:
-                        likes_count += 1
-                    else:
-                        match = re.search(r"(\d+)", likes_text)
+                    if "like" in likes_text.lower():
+                        match = re.search(r"(\\d+)", likes_text)
                         if match:
                             likes_count += int(match.group(1))
+                        else:
+                            likes_count += 1
 
-                print("Likes count (Approach 1):", likes_count)
-
-                # Append the collected data to the combined dataset
-                combined_data.append((comment_text, comment_time, likes_count))
+                combined_data.append({"comment": comment_text, "time": None, "likes": likes_count})
             except Exception as e:
-                print(f"[❌] Помилка при обробці коментаря (Approach 1): {e}")
+                print(f"[ERROR] Comment parse failed: {e}")
 
-        # PART 2: Collect data based on <time> elements
-        print("[🔍] Збір коментарів з другого підходу...")
+        # Approach 2: times only
         time_elements = driver.find_elements(By.XPATH, "//time[@datetime]")
+        times = [t.get_attribute("datetime") for t in time_elements]
 
-        for time_element in time_elements:
-            try:
-                # Extract the time value
-                comment_time = time_element.get_attribute("datetime")
-                print("Time (Approach 2):", comment_time)
+        for i in range(min(len(combined_data), len(times))):
+            combined_data[i]["time"] = times[i]
 
-                # Navigate to the parent container of the <time> element
-                parent_container = time_element.find_element(By.XPATH, "./ancestor::div[1]")
-
-                # Extract the comment text within the parent container
-                try:
-                    comment_text_element = parent_container.find_element(By.XPATH, ".//span[@dir='auto']")
-                    comment_text = comment_text_element.text.strip()
-                except Exception:
-                    comment_text = None
-
-                print("Comment text (Approach 2):", comment_text)
-
-                # Extract likes count if available
-                likes_count = 0
-                likes_elements = parent_container.find_elements(
-                    By.XPATH,
-                    ".//span[contains(text(), 'Позначки «Подобається»')] | .//span[contains(text(), 'вподобання')]"
-                )
-                for likes_elem in likes_elements:
-                    likes_text = likes_elem.text.strip()
-                    if "вподобання" in likes_text:
-                        likes_count += 1
-                    else:
-                        match = re.search(r"(\d+)", likes_text)
-                        if match:
-                            likes_count += int(match.group(1))
-
-                print("Likes count (Approach 2):", likes_count)
-
-                # Append the collected data to the combined dataset
-                combined_data.append((comment_text, comment_time, likes_count))
-            except Exception as e:
-                print(f"[❌] Помилка при обробці коментаря (Approach 2): {e}")
-
-        print(f"[✅] Зібрано {len(combined_data)} коментарів.")
-        for idx, data in enumerate(combined_data):
-            print(f"[{idx}] Comment: {data[0]}, Time: {data[1]}, Likes: {data[2]}")
+        return [(d["comment"], d["time"], d["likes"]) for d in combined_data]
 
     except Exception as e:
-        print(f"[❌] Загальна помилка при зборі даних: {e}")
-
-    return combined_data
-
-
+        print(f"[ERROR] Collect failed: {e}")
+        return [(d["comment"], d["time"], d["likes"]) for d in combined_data]
 def collect_comments(driver):
     """
-    Збирає всі коментарі зі сторінки.
+        .
     """
     comments = []
     try:
@@ -352,9 +320,9 @@ def collect_comments(driver):
             text = elem.text.strip()
             if text:
                 comments.append(text)
-        print(f"[✅] Зібрано {len(comments)} коментарів.")
+        print(f"[INFO] Collected {len(comments)} comments.")
     except Exception as e:
-        print(f"[❌] Помилка при зборі коментарів: {e}")
+        print(f"[ERROR] Comment collection error: {e}")
     return comments
 
 
@@ -362,99 +330,112 @@ def try_press_cancel_button(driver):
     try:
         close_button = driver.find_element(By.XPATH, "//div[@role='button' and @aria-label='Close']")
         close_button.click()
-        print("[✅] Close button clicked successfully.")
+        print("[INFO] Close button clicked.")
     except Exception:
         pass
 
 
 def click_view_all_comments(driver):
     """
-    Знаходить і натискає кнопку "View all comments".
+        "View all comments".
     """
     try:
         view_all_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, "//a[.//span[contains(text(), 'View all')]]"))
         )
         view_all_button.click()
-        print("[✅] Кнопка 'View all comments' натиснута.")
+        print("[INFO] Clicked 'View all comments'.")
         return True
     except Exception:
-        print(f"Кнопку 'View all comments' не натиснуто.")
+        print("[INFO] 'View all comments' not found.")
         return False
 
 
 def click_more_button(driver):
     """
-    Знаходить і натискає кнопку 'more' на сторінці.
+        'more'  .
     """
     try:
         more_button_xpath = "//div[@aria-disabled='false' and @role='button' and @style='cursor: pointer; display: inline-block;']//span[text()='more']"
 
         more_button = driver.find_element(By.XPATH, more_button_xpath)
-        print("[ℹ️] Кнопка 'more' знайдена. Натискаємо...")
+        print("[INFO] Found 'more' button, clicking...")
 
         more_button.click()
-        print("[✅] Кнопка 'more' натиснута.")
+        print("[INFO] Clicked 'more' button.")
 
         return True
     except NoSuchElementException:
-        print("[❌] Кнопка 'more' не знайдена.")
+        print("[INFO] 'more' button not found.")
         return False
     except Exception as e:
-        print(f"[❌] Помилка під час натискання кнопки 'more': {e}")
+        print(f"[ERROR] Error clicking 'more': {e}")
         return False
 
 
 def save_comments(driver, POST_URL, target_page):
-    print("[🔍] Відкриваємо публікацію...")
+    print("[INFO] Opening post...")
     driver.get(POST_URL)
     time.sleep(random.uniform(5, 7))
     try_press_cancel_button(driver)
-    print("[⏬] Завантажуємо коментарі...")
+    print("[INFO] Loading comments...")
     scroll_and_load_comments(driver)
 
-    print("[📥] Збираємо коментарі...")
+    print("[INFO] Collecting comments...")
     comments_data = collect_comments_and_likes(driver)
     print(comments_data)
-    print(f"[✅] Зібрано {len(comments_data)} коментарів. Зберігаємо у файл...")
+    print(f"[INFO] Collected {len(comments_data)} comments. Saving CSV...")
     df = pd.DataFrame(comments_data, columns=["Comment", "Time", "Likes"])
     print(f"df: {df}")
-    df.to_csv(get_next_filename(target_page), index=False, encoding="utf-8-sig")
+    output_path = get_next_filename(target_page)
+    df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
-    print(f"[🎉] Успішно збережено в файл: {get_next_filename(target_page)}")
+    print(f"[INFO] Saved CSV: {output_path}")
 
 
-def find_scroll_element_by_scroll_properties(driver, element_owner):
+def find_scroll_elements_by_scroll_properties(driver, element_owner):
     """
-    Знаходить скролюваний елемент, перевіряючи його властивості.
+      ,   .
     """
     time.sleep(random.uniform(2, 4))
     try_press_cancel_button(driver)
     time.sleep(random.uniform(2, 4))
     try:
-        div_elements = driver.find_elements(By.TAG_NAME, element_owner)
+        elements = driver.find_elements(By.TAG_NAME, element_owner)
+        candidates = []
+        for elem in elements:
+            try:
+                scroll_height = driver.execute_script("return arguments[0].scrollHeight;", elem)
+                client_height = driver.execute_script("return arguments[0].clientHeight;", elem)
+                potential = scroll_height - client_height
+                if potential > 0:
+                    candidates.append((potential, elem))
+            except Exception:
+                continue
 
-        for div in div_elements:
-            is_scrollable = driver.execute_script(
-                "return arguments[0].scrollHeight > arguments[0].clientHeight;", div
-            )
-            if is_scrollable:
-                print("[✅] Знайдено скролюваний елемент.")
-                return div
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        if candidates:
+            print(f"[INFO] Found {len(candidates)} scrollable containers. Using the largest first.")
+            return [elem for _, elem in candidates]
 
-        print("[❌] Скролюваний елемент не знайдено.")
-        return None
+        print("[WARN] Scrollable container not found.")
+        return []
     except Exception as e:
-        print(f"[❌] Помилка під час пошуку скролюваного елемента: {e}")
-        return None
+        print(f"[ERROR] Scrollable container search error: {e}")
+        return []
+
+
+def find_scroll_element_by_scroll_properties(driver, element_owner):
+    containers = find_scroll_elements_by_scroll_properties(driver, element_owner)
+    return containers[0] if containers else None
 
 
 def collect_all_hrefs(container_element, target_page, number_of_posts):
     """
-    Збирає всі значення href з елементів <a> всередині вказаного контейнера.
+       href   <a>   .
 
-    :param container_element: елемент контейнера <div>, в якому потрібно шукати <a>
-    :return: список значень href
+    :param container_element:   <div>,     <a>
+    :return:   href
     """
     hrefs = []
     try:
@@ -463,10 +444,10 @@ def collect_all_hrefs(container_element, target_page, number_of_posts):
             href = anchor.get_attribute("href")
             if href:
                 hrefs.append(href.replace(f"/{target_page}", ""))
-        print(f"[✅] Зібрано {len(hrefs)} посилань.")
-        return hrefs[0:number_of_posts]
+        print(f"[INFO] Collected {len(hrefs)} post links.")
+        return list(reversed(hrefs))[0:number_of_posts]
     except Exception as e:
-        print(f"[❌] Помилка при зборі посилань: {e}")
+        print(f"[ERROR] Link collection error: {e}")
 
 
 def load_all_posts(driver, target_page, number_of_posts):
@@ -478,11 +459,11 @@ def load_all_posts(driver, target_page, number_of_posts):
     while True:
         try:
             if not try_scroll_page(driver, scroll_container, limit_scrolling=True):
-                print("[ℹ️] Усі дописи завантажено.")
+                print("[INFO] All posts loaded.")
                 break
             time.sleep(random.uniform(2, 4))
         except Exception as e:
-            print(f"[❌] Помилка під час завантаження дописів: {e}")
+            print(f"[ERROR] Post loading error: {e}")
             break
     container_element = driver.find_element(By.XPATH,
                                             "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') and contains(., 'position: relative')]]")
@@ -499,21 +480,21 @@ def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
     time.sleep(random.uniform(3, 5))
 
     try:
-        print("[🔍] Відкриваємо Instagram...\n")
-        log += "[🔍] Відкриваємо Instagram...\n"  # Add log message
+        print("[INFO] Opening Instagram...\n")
+        log += "[INFO] Opening Instagram...\n"  # Add log message
         driver.get("https://www.instagram.com/")
         time.sleep(random.uniform(3, 5))
-        print("[🔍] збираємо cookies\n")
-        log += "[🔍] збираємо cookies\n"  # Add log message
+        print("[INFO] Loading cookies...\n")
+        log += "[INFO] Loading cookies...\n"  # Add log message
         load_cookie_success = load_cookies(driver)
         if load_cookie_success:
-            print("[✅] успішно використано попередні Cookie\n")
-            log += "[✅] успішно використано попередні Cookie\n"  # Add success log
+            print("[INFO] Cookies loaded successfully.\n")
+            log += "[INFO] Cookies loaded successfully.\n"  # Add success log
         else:
-            print("[❌] не вдалось використати попередні Cookie\n")
-            log += "[❌] не вдалось використати попередні Cookie\n"  # Add failure log
-        print("[🔍] Виконуємо авторизацію...\n")
-        log += "[🔍] Виконуємо авторизацію...\n"  # Add log message
+            print("[INFO] No valid cookies. Logging in.\n")
+            log += "[INFO] No valid cookies. Logging in.\n"  # Add failure log
+        print("[INFO] Starting data collection...\n")
+        log += "[INFO] Starting data collection...\n"  # Add log message
         if load_cookie_success:
             for i in load_all_posts(driver, target_page, number_of_posts):
                 save_comments(driver, i, target_page)
@@ -524,13 +505,13 @@ def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
                 for i in load_all_posts(driver, target_page, number_of_posts):
                     save_comments(driver, i, target_page)
             else:
-                print(f"[❌] ./accounts/login/ in {driver.current_url}\n")
-                log += f"[❌] ./accounts/login/ in {driver.current_url}\n"  # Add failure log
-        print("[✅] успішно завантажено всі дані\n")
-        log += "[✅] успішно завантажено всі дані\n"  # Add success log
+                print(f"[WARN] Login failed: still at {driver.current_url}\n")
+                log += f"[WARN] Login failed: still at {driver.current_url}\n"  # Add failure log
+        print("[INFO] Data collection finished.\n")
+        log += "[INFO] Data collection finished.\n"  # Add success log
     except Exception as e:
-        print(f"[❌] Помилка: {e}\n")
-        log += f"[❌] Помилка: {e}\n"  # Add error log
+        print(f"[ERROR] Data collection error: {e}\n")
+        log += f"[ERROR] Data collection error: {e}\n"  # Add error log
 
     finally:
         driver.quit()
@@ -538,6 +519,14 @@ def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
     return log
 
 
-load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
+if __name__ == "__main__":
+    load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
 
-# insert_data_to_database()
+    # insert_data_to_database()
+
+
+
+
+
+
+
