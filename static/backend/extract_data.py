@@ -538,7 +538,7 @@ def load_all_posts(driver, target_page, number_of_posts):
     return collect_all_hrefs(container_element, target_page, number_of_posts)
 
 
-def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
+def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
     delete_previos_files()
     user_agent = UserAgent()
     log = ""
@@ -588,7 +588,7 @@ def load_data(USERNAME, PASSWORD, target_page, number_of_posts):
 
 
 if __name__ == "__main__":
-    load_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
+    extract_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
     # insert_data_to_database()
 
 

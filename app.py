@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory
-from static.backend.load_data import load_data
+from static.backend.extract_data import extract_data
+from static.backend.load_to_db import load_to_db
 from static.backend.db_connection import insert_new_user, fetch_user
 import hashlib
 from flask_cors import CORS
@@ -25,7 +26,6 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 logger.debug("Application started.")
 
-# Reduce noisy third-party logs
 logging.getLogger("selenium").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
@@ -89,6 +89,7 @@ def login():
                 return jsonify({'error': 'Invalid username or password'}), 401
         else:
             return jsonify({'error': 'User not found'}), 404
+    return None
 
 
 @app.route('/logout', methods=['POST'])
@@ -165,6 +166,7 @@ def signup():
         password_hash = hashlib.sha256(password.encode()).hexdigest()
 
         insert_new_user(username, email, password_hash)
+    return None
 
 
 @app.route('/process-data', methods=['POST'])
@@ -181,7 +183,10 @@ def process_data_endpoint():
 
 
         # Step 1: Load data
-        data = load_data(instagram_username, instagram_password, target_page, number_of_posts)
+        data = extract_data(instagram_username, instagram_password, target_page, number_of_posts)
+        logger.debug("Starting load_to_db after extract_data")
+        load_to_db(dry_run=False)
+        logger.debug("load_to_db finished")
 
         # # Step 2: Analyze data
         # analyzed_data = analyze_data(data)
@@ -194,60 +199,47 @@ def process_data_endpoint():
         return jsonify(
             {'success': True, 'result': (target_page, number_of_posts, instagram_username, instagram_password)}), 200
     except Exception as e:
-        # Handle unexpected errors
+        logger.exception("process-data failed")
         return jsonify({'error': str(e)}), 500
 
 
 @jwt.invalid_token_loader
 def invalid_token_callback(error):
     logger.debug(f"Invalid token error: {error}")
-    # Check if the request is an API call (e.g., AJAX or Fetch)
     if request.headers.get("Accept") == "application/json":
-        # Return a JSON response for API requests
         return jsonify({"error": "Invalid token", "action": "logout"}), 401
     else:
-        # Redirect to the login page for non-API requests (e.g., browser page loads)
-        next_url = request.path  # Preserve the original path for redirection
+        next_url = request.path
         return redirect(url_for('login', next=next_url))
 
 
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
     logger.debug(f"Expired token for user: {jwt_payload.get('sub')}")
-    # Check if the request is an API call (e.g., AJAX or Fetch)
     if request.headers.get("Accept") == "application/json":
-        # Return a JSON response for API requests
-        return jsonify({"error": "Token has expired", "action": "refresh"}), 401  # Suggest refresh
+        return jsonify({"error": "Token has expired", "action": "refresh"}), 401
     else:
-        # Redirect to the login page for non-API requests (e.g., browser page loads)
-        next_url = request.path  # Preserve the original path for redirection
+        next_url = request.path
         return redirect(url_for('login', next=next_url))
 
 
-# Callback for missing tokens
 @jwt.unauthorized_loader
 def missing_token_callback(error):
     logger.debug(f"Missing token error: {error}")
-    # Check if the request is an API call (e.g., AJAX or Fetch)
     if request.headers.get("Accept") == "application/json":
-        # Return a JSON response for API requests
-        return jsonify({"error": "Missing token", "action": "redirect_to_login"}), 401  # Suggest login
+        return jsonify({"error": "Missing token", "action": "redirect_to_login"}), 401
     else:
-        # Redirect to the login page for non-API requests (e.g., browser page loads)
-        next_url = request.path  # Preserve the original path for redirection
+        next_url = request.path
         return redirect(url_for('login', next=next_url))
 
 
-# Callback for revoked tokens
 @jwt.revoked_token_loader
 def revoked_token_callback(jwt_header, jwt_payload):
     logger.debug(f"Revoked token for user: {jwt_payload.get('sub')}")
     if request.headers.get("Accept") == "application/json":
-        # Return a JSON response for API requests
-        return jsonify({"error": "Token has been revoked", "action": "logout"}), 401  # Suggest logout
+        return jsonify({"error": "Token has been revoked", "action": "logout"}), 401
     else:
-        # Redirect to the login page for non-API requests (e.g., browser page loads)
-        next_url = request.path  # Preserve the original path for redirection
+        next_url = request.path
         return redirect(url_for('login', next=next_url))
 
 

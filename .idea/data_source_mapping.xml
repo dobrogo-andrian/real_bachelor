@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DataSourcePerFileMappings">
+    <file url="file://$PROJECT_DIR$/static/backend/db_connection.py" value="112b2d03-402f-423e-9431-90c5f53b1a2b" />
+    <file url="file://$PROJECT_DIR$/static/backend/load_to_db.py" value="112b2d03-402f-423e-9431-90c5f53b1a2b" />
+  </component>
+</project>

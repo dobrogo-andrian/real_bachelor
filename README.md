@@ -19,7 +19,7 @@ See `PROJECT_STRUCTURE.md` for a detailed map of modules and responsibilities.
    - `selenium`, `fake-useragent`
    - `pandas`, `langdetect`, `transformers`
    - `seaborn`, `matplotlib`, `statsmodels`
-3. Ensure ChromeDriver is installed and update the path in `static/backend/load_data.py`.
+3. Ensure ChromeDriver is installed and update the path in `static/backend/extract_data.py`.
 4. Configure your database and update connection details in `static/backend/db_connection.py`.
 5. Set `JWT_SECRET_KEY` in `app.py` or via environment variable.
 
@@ -30,16 +30,17 @@ python app.py
 App will start on `http://localhost:5000`.
 
 ## Data Pipeline Flow
-1. Scrape comments: `static/backend/load_data.py`
+1. Scrape comments: `static/backend/extract_data.py`
 2. Filter and label language: `static/backend/process_data.py`
 3. Sentiment analysis: `static/backend/analyze_data.py`
 4. Aggregate dataset: `static/backend/agregate_data.py`
 5. Visualize: `static/backend/visualize_data.py`
+6. (Optional) Load to DB: `static/backend/load_to_db.py`
 
 ## Known Risks / TODO Highlights
 - JWT secret key is hardcoded.
 - CSRF protection is disabled.
-- `load_data.py` contains hardcoded Instagram credentials and runs on import.
+- `extract_data.py` contains hardcoded Instagram credentials and runs on import.
 - `static/backend/db_connection.py` has an incomplete `insert_data_to_database`.
 
 See `TODO.md` for the full list.
