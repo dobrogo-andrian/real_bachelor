@@ -1,0 +1,12 @@
+flask
+flask-cors
+flask-jwt-extended
+pyodbc
+selenium
+fake-useragent
+pandas
+langdetect
+transformers
+seaborn
+matplotlib
+statsmodels

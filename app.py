@@ -14,14 +14,14 @@ import logging
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 
 app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = 'your-secret-key'  # Required for signing tokens
-app.config['JWT_TOKEN_LOCATION'] = ['cookies']  # Use cookies for token storage
-app.config['JWT_COOKIE_SECURE'] = False  # Set to True if using HTTPS
-app.config['JWT_ACCESS_COOKIE_PATH'] = '/'  # Path for access token cookie
-app.config['JWT_REFRESH_COOKIE_PATH'] = '/refresh'  # Path for refresh token cookie
-app.config['JWT_COOKIE_CSRF_PROTECT'] = False  # Disable CSRF protection for simplicity
-logging.basicConfig(level=logging.DEBUG)  # Set logging level to DEBUG
-logger = logging.getLogger(__name__)  # Create a logger
+app.config['JWT_SECRET_KEY'] = 'your-secret-key'
+app.config['JWT_TOKEN_LOCATION'] = ['cookies']
+app.config['JWT_COOKIE_SECURE'] = False
+app.config['JWT_ACCESS_COOKIE_PATH'] = '/'
+app.config['JWT_REFRESH_COOKIE_PATH'] = '/refresh'
+app.config['JWT_COOKIE_CSRF_PROTECT'] = False
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 logger.debug("Application started.")
 CORS(app)
@@ -31,7 +31,7 @@ jwt = JWTManager(app)
 @app.route('/static/<path:filename>')
 @jwt_required()
 def static_proxy(filename):
-    current_user = get_jwt_identity()  # Get the user identity from the token
+    current_user = get_jwt_identity()
     logger.debug(f"Current user: {current_user}")
     return send_from_directory('static', filename)
 
@@ -42,12 +42,12 @@ def log_request():
 
 
 @app.route('/refresh', methods=['POST'])
-@jwt_required(refresh=True)  # Use refresh=True for refresh tokens
+@jwt_required(refresh=True)
 def refresh():
-    current_user = get_jwt_identity()  # Get the identity of the user
-    new_access_token = create_access_token(identity=current_user)  # Create a new access token
+    current_user = get_jwt_identity()
+    new_access_token = create_access_token(identity=current_user)
     response = jsonify({'message': 'Token refreshed successfully'})
-    set_access_cookies(response, new_access_token)  # Set the new access token in cookies
+    set_access_cookies(response, new_access_token)
     return response, 200
 
 
@@ -56,7 +56,6 @@ def login():
     if request.method == 'GET':
         next_url = request.args.get('next', '/')
 
-        # Prevent redirect loops by resetting `next` if it points to `/login`
         if next_url == '/login':
             next_url = '/'
 
@@ -90,7 +89,7 @@ def login():
 @app.route('/logout', methods=['POST'])
 def logout():
     response = jsonify({'message': 'Logout successful'})
-    unset_jwt_cookies(response)  # Remove the tokens from cookies
+    unset_jwt_cookies(response)
     return response, 200
 
 
@@ -98,8 +97,7 @@ def logout():
 @jwt_required()
 def user_info():
     current_user = get_jwt_identity()
-    # Fetch user details from the database using `current_user`
-    return jsonify(username=current_user, email="email@example.com")  # Example data
+    return jsonify(username=current_user, email="email@example.com")
 
 
 @app.route('/')
@@ -148,8 +146,7 @@ def test():
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'GET':
-        # Render the signup page
-        return render_template('signup.html')  # Ensure you have a `signup.html` template
+        return render_template('signup.html')
 
     elif request.method == 'POST':
         data = request.json or request.form
@@ -168,18 +165,16 @@ def signup():
 @app.route('/process-data', methods=['POST'])
 def process_data_endpoint():
     try:
-        # Get parameters from the request (JSON payload)
         params = request.json.get('params', {})
         target_page = params["param1"]
         number_of_posts = int(params["param2"])
         instagram_username = params["param3"]
         instagram_password = params["param4"]
 
-        # Validate input
         if not params:
             return jsonify({'error': 'No parameters provided.'}), 400
 
-        # Execute the sequence of functions
+
         # Step 1: Load data
         data = load_data(instagram_username, instagram_password, target_page, number_of_posts)
 
