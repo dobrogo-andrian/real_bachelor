@@ -450,7 +450,7 @@ def click_more_button(driver):
         return False
 
 
-def save_comments(driver, POST_URL, target_page):
+def save_comments(driver, POST_URL, target_page, page_name):
     print("[INFO] Opening post...")
     driver.get(POST_URL)
     time.sleep(random.uniform(5, 7))
@@ -463,6 +463,8 @@ def save_comments(driver, POST_URL, target_page):
     print(comments_data)
     print(f"[INFO] Collected {len(comments_data)} comments. Saving CSV...")
     df = pd.DataFrame(comments_data, columns=["Comment", "Time", "Likes"])
+    df.insert(0, "PageID", target_page)
+    df.insert(0, "PageName", page_name)
     print(f"df: {df}")
     output_path = get_next_filename(target_page, "unprocessed_data/comments1")
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
@@ -513,14 +515,35 @@ def collect_all_hrefs(container_element, target_page, number_of_posts):
             if href:
                 hrefs.append(href.replace(f"/{target_page}", ""))
         print(f"[INFO] Collected {len(hrefs)} post links.")
-        return list(reversed(hrefs))[0:number_of_posts]
+        return hrefs[0:number_of_posts]
     except Exception as e:
         print(f"[ERROR] Link collection error: {e}")
+
+
+def get_page_name(driver):
+    xpaths = [
+        "//header//h2//span[@dir='auto']",
+        "//header//div//span[@dir='auto']",
+        "//div[contains(@class,'x1q0g3np')]//span[@dir='auto']",
+    ]
+    for xp in xpaths:
+        try:
+            elem = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, xp))
+            )
+            text = elem.text.strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    return None
 
 
 def load_all_posts(driver, target_page, number_of_posts):
     time.sleep(random.uniform(2, 4))
     driver.get(f"https://www.instagram.com/{target_page}/")
+    time.sleep(random.uniform(2, 4))
+    page_name = get_page_name(driver) or target_page
     time.sleep(random.uniform(2, 4))
     scroll_container = find_scroll_element_by_scroll_properties(driver, "html")
     time.sleep(random.uniform(2, 4))
@@ -535,7 +558,8 @@ def load_all_posts(driver, target_page, number_of_posts):
             break
     container_element = driver.find_element(By.XPATH,
                                             "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') and contains(., 'position: relative')]]")
-    return collect_all_hrefs(container_element, target_page, number_of_posts)
+    hrefs = collect_all_hrefs(container_element, target_page, number_of_posts)
+    return hrefs, page_name
 
 
 def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
@@ -564,14 +588,16 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
         print("[INFO] Starting data collection...\n")
         log += "[INFO] Starting data collection...\n"  # Add log message
         if load_cookie_success:
-            for i in load_all_posts(driver, target_page, number_of_posts):
-                save_comments(driver, i, target_page)
+            posts, page_name = load_all_posts(driver, target_page, number_of_posts)
+            for i in posts:
+                save_comments(driver, i, target_page, page_name)
         else:
             login_to_instagram(driver, USERNAME, PASSWORD)
             save_cookies(driver)
             if "/accounts/login/" not in driver.current_url:
-                for i in load_all_posts(driver, target_page, number_of_posts):
-                    save_comments(driver, i, target_page)
+                posts, page_name = load_all_posts(driver, target_page, number_of_posts)
+                for i in posts:
+                    save_comments(driver, i, target_page, page_name)
             else:
                 print(f"[WARN] Login failed: still at {driver.current_url}\n")
                 log += f"[WARN] Login failed: still at {driver.current_url}\n"  # Add failure log

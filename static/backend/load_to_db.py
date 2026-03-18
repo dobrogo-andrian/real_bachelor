@@ -1,6 +1,6 @@
 import os
-import re
 import hashlib
+import re
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -19,29 +19,53 @@ def validate_columns(df):
         raise ValueError(f"Missing required columns: {missing}")
 
 
-def parse_post_number(filename):
-    match = re.search(r"_(\d+)\.csv$", filename)
-    return int(match.group(1)) if match else None
+def derive_page_id(filename):
+    match = re.match(r"(.+)_\d+\.csv$", filename, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return os.path.splitext(filename)[0]
 
 
-def compute_comment_hash(page_id, post_time, row_index):
-    base = f"{page_id}|{post_time or ''}|{row_index}"
+def normalize_hash_value(value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    if isinstance(value, pd.Timestamp):
+        value = value.to_pydatetime()
+    if hasattr(value, "isoformat"):
+        return value.isoformat(timespec="seconds")
+    return str(value).strip()
+
+
+def compute_comment_hash(page_id, post_time, comment_time, comment):
+    base = "|".join([
+        normalize_hash_value(page_id),
+        normalize_hash_value(post_time),
+        normalize_hash_value(comment_time),
+        normalize_hash_value(comment),
+    ])
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
-def prepare_rows(df, page_id, post_number, post_time, load_time):
+def prepare_rows(df, page_id, post_time, load_time):
     validate_columns(df)
     rows = []
-    for idx, row in enumerate(df.itertuples(index=False), start=1):
+    for row in df.itertuples(index=False):
         comment_time = pd.to_datetime(row.Time, errors="coerce")
+        comment_time_value = comment_time.to_pydatetime() if pd.notna(comment_time) else None
+        comment_value = str(row.Comment)
+        page_name = getattr(row, "PageName", None)
+        row_page_id = getattr(row, "PageID", None)
+        if page_name is None or str(page_name).strip() == "":
+            page_name = "unknown"
+        if row_page_id is None or str(row_page_id).strip() == "":
+            row_page_id = page_id
         rows.append({
-            "CommentHash": compute_comment_hash(page_id, post_time, idx),
-            "PageName": "unknown",
-            "PageID": page_id,
+            "CommentHash": compute_comment_hash(row_page_id, post_time, comment_time_value, comment_value),
+            "PageName": page_name,
+            "PageID": row_page_id,
             "PostTime": post_time,
-            "PostNumber": post_number,
-            "Comment": str(row.Comment),
-            "CommentTime": comment_time.to_pydatetime() if pd.notna(comment_time) else None,
+            "Comment": comment_value,
+            "CommentTime": comment_time_value,
             "CommentLikes": int(row.Likes) if str(row.Likes).strip() else 0,
             "LoadTime": load_time,
             "Source": "Web interface",
@@ -60,7 +84,6 @@ def insert_rows(conn, rows):
         (pyodbc.SQL_WVARCHAR, 100, 0),
         (pyodbc.SQL_WVARCHAR, 100, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
-        (pyodbc.SQL_INTEGER, 0, 0),
         (pyodbc.SQL_WVARCHAR, 0, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
         (pyodbc.SQL_INTEGER, 0, 0),
@@ -76,7 +99,6 @@ def insert_rows(conn, rows):
                 ? AS [PageName],
                 ? AS [PageID],
                 ? AS [PostTime],
-                ? AS [PostNumber],
                 ? AS [Comment],
                 ? AS [CommentTime],
                 ? AS [CommentLikes],
@@ -84,24 +106,32 @@ def insert_rows(conn, rows):
                 ? AS [Source]
         ) AS source
         ON target.[CommentHash] = source.[CommentHash]
-        WHEN MATCHED THEN
+        WHEN MATCHED AND (
+            ISNULL(target.[PageName], N'') <> ISNULL(source.[PageName], N'')
+            OR ISNULL(target.[PageID], N'') <> ISNULL(source.[PageID], N'')
+            OR ISNULL(target.[PostTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[PostTime], CONVERT(datetime2(0), '1900-01-01'))
+            OR ISNULL(target.[Comment], N'') <> ISNULL(source.[Comment], N'')
+            OR ISNULL(target.[CommentTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[CommentTime], CONVERT(datetime2(0), '1900-01-01'))
+            OR ISNULL(target.[CommentLikes], -1) <> ISNULL(source.[CommentLikes], -1)
+            OR ISNULL(target.[Source], N'') <> ISNULL(source.[Source], N'')
+        ) THEN
             UPDATE SET
                 [PageName] = source.[PageName],
                 [PageID] = source.[PageID],
                 [PostTime] = source.[PostTime],
-                [PostNumber] = source.[PostNumber],
                 [Comment] = source.[Comment],
                 [CommentTime] = source.[CommentTime],
                 [CommentLikes] = source.[CommentLikes],
                 [LoadTime] = source.[LoadTime],
+                [UpdateTime] = source.[LoadTime],
                 [Source] = source.[Source]
         WHEN NOT MATCHED THEN
             INSERT (
-                [CommentHash], [PageName], [PageID], [PostTime], [PostNumber],
+                [CommentHash], [PageName], [PageID], [PostTime],
                 [Comment], [CommentTime], [CommentLikes], [LoadTime], [Source]
             )
             VALUES (
-                source.[CommentHash], source.[PageName], source.[PageID], source.[PostTime], source.[PostNumber],
+                source.[CommentHash], source.[PageName], source.[PageID], source.[PostTime],
                 source.[Comment], source.[CommentTime], source.[CommentLikes], source.[LoadTime], source.[Source]
             );
         """,
@@ -111,7 +141,6 @@ def insert_rows(conn, rows):
                 r["PageName"],
                 r["PageID"],
                 r["PostTime"],
-                r["PostNumber"],
                 r["Comment"],
                 r["CommentTime"],
                 r["CommentLikes"],
@@ -157,8 +186,7 @@ def load_to_db(input_folder="unprocessed_data", dry_run=True):
     try:
         for input_csv_path in input_files:
             filename = os.path.basename(input_csv_path)
-            page_id = filename
-            post_number = parse_post_number(filename)
+            page_id = derive_page_id(filename)
 
             df = pd.read_csv(input_csv_path)
             validate_columns(df)
@@ -167,7 +195,7 @@ def load_to_db(input_folder="unprocessed_data", dry_run=True):
             post_time = time_series.dropna().iloc[0].to_pydatetime() if not time_series.dropna().empty else None
             load_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
-            rows = prepare_rows(df, page_id, post_number, post_time, load_time)
+            rows = prepare_rows(df, page_id, post_time, load_time)
 
             if dry_run:
                 print(f"[DRY RUN] Prepared {len(rows)} rows from {input_csv_path}")
