@@ -43,3 +43,32 @@ def fetch_user(username):
     cursor.execute('SELECT PasswordHash FROM Users WHERE Username = ?', (username,))
     return cursor.fetchone()
 
+
+def fetch_distinct_comment_dimensions():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT DISTINCT [PageName]
+            FROM [dbo].[Comments]
+            WHERE [PageName] IS NOT NULL AND LTRIM(RTRIM([PageName])) <> ''
+            ORDER BY [PageName]
+        """)
+        page_names = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute("""
+            SELECT DISTINCT [PageID]
+            FROM [dbo].[Comments]
+            WHERE [PageID] IS NOT NULL AND LTRIM(RTRIM([PageID])) <> ''
+            ORDER BY [PageID]
+        """)
+        page_ids = [row[0] for row in cursor.fetchall()]
+
+        return {
+            "page_names": page_names,
+            "page_ids": page_ids,
+        }
+    finally:
+        cursor.close()
+        conn.close()
+

@@ -1,0 +1,196 @@
+.dashboard-banner .content {
+    max-width: 56rem;
+}
+
+.dashboard-hero-grid,
+.workspace-shell,
+.schema-grid,
+.pipeline-grid,
+.insight-grid,
+.release-grid,
+.implementation-grid {
+    display: grid;
+    gap: 1.5rem;
+}
+
+.dashboard-hero-grid,
+.workspace-shell,
+.release-grid,
+.implementation-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.schema-grid,
+.pipeline-grid,
+.insight-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.dashboard-section {
+    position: relative;
+}
+
+.dashboard-section .inner {
+    position: relative;
+}
+
+.alt-surface,
+.implementation-surface {
+    background: linear-gradient(180deg, rgba(36, 41, 67, 0.3), rgba(20, 24, 40, 0.75));
+}
+
+.hero-stat,
+.workspace-panel,
+.schema-card,
+.pipeline-card,
+.insight-card,
+.release-card,
+.implementation-grid article {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 1rem;
+    padding: 1.5rem;
+    backdrop-filter: blur(8px);
+}
+
+.workspace-panel.emphasis {
+    background: linear-gradient(145deg, rgba(233, 191, 74, 0.18), rgba(70, 121, 189, 0.22));
+}
+
+.hero-stat strong,
+.schema-card h3,
+.pipeline-card h3,
+.insight-card h3,
+.workspace-panel h3,
+.release-card h3,
+.implementation-grid h3 {
+    display: block;
+    margin-bottom: 0.4rem;
+}
+
+.eyebrow,
+.panel-label,
+.schema-role,
+.module-chip,
+.insight-output {
+    display: inline-block;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+}
+
+.panel-label,
+.schema-role,
+.module-chip {
+    margin-bottom: 0.75rem;
+    color: #f4d35e;
+}
+
+.hero-stat span:last-child,
+.insight-output {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.control-surface {
+    margin-top: 2rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1.5rem;
+    padding: 1.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 1rem;
+    background: rgba(17, 21, 35, 0.75);
+}
+
+.control-column h3 {
+    margin-bottom: 1rem;
+}
+
+.control-column label {
+    display: block;
+    margin-bottom: 0.35rem;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.control-column input,
+.control-column select {
+    margin-bottom: 1rem;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 0.6rem;
+}
+
+.action-column {
+    display: flex;
+    flex-direction: column;
+}
+
+.action-list {
+    margin-bottom: 1.5rem;
+}
+
+.action-list li {
+    margin-bottom: 0.75rem;
+}
+
+.action-buttons {
+    margin-top: auto;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.workspace-panel select {
+    min-height: 16rem;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 0.6rem;
+}
+
+.page-selector-panel {
+    margin-top: 1rem;
+}
+
+.selector-caption {
+    margin-bottom: 0.75rem;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.workspace-panel select:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.data-warning,
+.selection-hint {
+    margin-top: 1rem;
+    padding: 1rem 1.25rem;
+    border-radius: 0.8rem;
+}
+
+.data-warning {
+    background: rgba(214, 80, 80, 0.12);
+    border: 1px solid rgba(214, 80, 80, 0.35);
+}
+
+.selection-hint {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.workspace-panel ul,
+.action-list,
+.release-card p {
+    margin-bottom: 0;
+}
+
+@media screen and (max-width: 736px) {
+    .hero-stat,
+    .workspace-panel,
+    .schema-card,
+    .pipeline-card,
+    .insight-card,
+    .release-card,
+    .implementation-grid article,
+    .control-surface {
+        padding: 1.2rem;
+    }
+}

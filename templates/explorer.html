@@ -1,0 +1,235 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+        <title>Comments Explorer</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+        <link rel="stylesheet" href="../static/assets/css/main.css" />
+        <link rel="stylesheet" href="../static/assets/css/landing-dashboard.css" />
+        <noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
+    </head>
+    <body class="is-preload">
+        <div id="wrapper">
+            <header id="header" class="alt style2">
+                <a href="/" class="logo"><strong>Comment Lab</strong> <span>explorer</span></a>
+                <nav>
+                    <a href="#menu">Menu</a>
+                </nav>
+            </header>
+
+            <nav id="menu">
+                <ul class="links">
+                    <li><a href="/">Home</a></li>
+                    <li><a href="/explorer">Explorer</a></li>
+                    <li><a href="/advanced-analysis">Advanced Analysis</a></li>
+                    <li><a href="/extractor">Extractor</a></li>
+                </ul>
+                <ul class="actions stacked">
+                    <li><a href="/explorer" class="button primary fit">Open Explorer</a></li>
+                    <li><a href="/advanced-analysis" class="button fit">Advanced analysis</a></li>
+                </ul>
+            </nav>
+
+            <section id="banner" class="style2 dashboard-banner">
+                <div class="inner">
+                    <span class="image">
+                        <img src="../static/assets/images/pic07.jpg" alt="Comment exploration dashboard" />
+                    </span>
+                    <header class="major">
+                        <h1>Comments Explorer</h1>
+                    </header>
+                    <div class="content">
+                        <p>
+                            Use this page to explore comment data, switch analysis views, and inspect final results.
+                        </p>
+                    </div>
+                    <div class="dashboard-hero-grid">
+                        <article class="hero-stat">
+                            <span class="eyebrow">Signed in</span>
+                            <strong>{{ current_user }}</strong>
+                            <span>Protected analysis area</span>
+                        </article>
+                        <article class="hero-stat">
+                            <span class="eyebrow">Focus</span>
+                            <strong>Exploration</strong>
+                            <span>Filters, charts, tables, drill-down</span>
+                        </article>
+                        <article class="hero-stat">
+                            <span class="eyebrow">Reference</span>
+                            <strong>FAQ page</strong>
+                            <span>Purpose, schema, pipeline, guidance</span>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <div id="main">
+                <section class="dashboard-section">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Select A Page To Analyze</h2>
+                        </header>
+                        <div class="workspace-shell">
+                            <article class="workspace-panel emphasis">
+                                <span class="panel-label">Option one</span>
+                                <h3>Choose a page by name</h3>
+                                <p>Page names stay hidden until you open the selector.</p>
+                                <button id="toggle-page-name-selector" class="button primary">Select page to analyze</button>
+                                <div id="page-name-selector-panel" class="page-selector-panel" hidden>
+                                    <p class="selector-caption">Available pages from distinct <code>PageName</code> values.</p>
+                                    <select id="page-name-selector" size="10">
+                                        {% for page_name in page_names %}
+                                        <option value="{{ page_name }}">{{ page_name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </article>
+                            <article class="workspace-panel">
+                                <span class="panel-label">Option two</span>
+                                <h3>Choose a page by id</h3>
+                                <p>Page IDs stay hidden until you open the selector.</p>
+                                <button id="toggle-page-id-selector" class="button primary">Select page to analyze</button>
+                                <div id="page-id-selector-panel" class="page-selector-panel" hidden>
+                                    <p class="selector-caption">Available pages from distinct <code>PageID</code> values.</p>
+                                    <select id="page-id-selector" size="10">
+                                        {% for page_id in page_ids %}
+                                        <option value="{{ page_id }}">{{ page_id }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </article>
+                        </div>
+                        {% if page_loading_error %}
+                        <p class="data-warning">
+                            Could not load page lists from the database: {{ page_loading_error }}
+                        </p>
+                        {% elif not page_names and not page_ids %}
+                        <p class="data-warning">
+                            No pages were returned from <code>Comments</code>. Load data first, then reopen the explorer.
+                        </p>
+                        {% endif %}
+                        <div class="selection-hint">
+                            <p>
+                                The next step will be to bind the selected name or ID to the filters and load the result
+                                panels for that page.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="selection-result-section" class="dashboard-section alt-surface">
+                    <div class="inner">
+                        <header class="major">
+                            <h2 id="selection-result-title">Select a page to start analysis...</h2>
+                        </header>
+                        <div class="release-grid">
+                            <article class="release-card">
+                                <h3 id="selection-result-mode">Waiting for selection</h3>
+                                <p id="selection-result-description">
+                                    After choosing a page by name or by id, this section will confirm the target page and move you into the analysis flow.
+                                </p>
+                            </article>
+                            <article class="release-card">
+                                <h3>Next step</h3>
+                                <p>
+                                    Once the target page is selected, continue to the advanced analysis page to work with filters, views, and result panels.
+                                </p>
+                            </article>
+                        </div>
+                        <div class="action-buttons">
+                            <a href="/advanced-analysis" class="button primary">Open advanced analysis</a>
+                            <a href="/faq" class="button">Read FAQ</a>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <footer id="footer">
+                <div class="inner">
+                    <ul class="icons">
+                        <li><a href="#" class="icon brands alt fa-instagram"><span class="label">Instagram</span></a></li>
+                        <li><a href="#" class="icon brands alt fa-github"><span class="label">GitHub</span></a></li>
+                    </ul>
+                    <ul class="copyright">
+                        <li>&copy; Comment Lab</li>
+                        <li>Explorer for analysis results and data exploration</li>
+                        <li><a href="/faq">FAQ</a></li>
+                        <li><a href="/elements">Elements</a></li>
+                    </ul>
+                </div>
+            </footer>
+        </div>
+
+        <script src="../static/assets/js/jquery.min.js"></script>
+        <script src="../static/assets/js/jquery.scrolly.min.js"></script>
+        <script src="../static/assets/js/jquery.scrollex.min.js"></script>
+        <script src="../static/assets/js/browser.min.js"></script>
+        <script src="../static/assets/js/breakpoints.min.js"></script>
+        <script src="../static/assets/js/util.js"></script>
+        <script src="../static/assets/js/main.js"></script>
+        <script>
+            (function () {
+                const toggleNameButton = document.getElementById('toggle-page-name-selector');
+                const toggleIdButton = document.getElementById('toggle-page-id-selector');
+                const nameSelectorPanel = document.getElementById('page-name-selector-panel');
+                const idSelectorPanel = document.getElementById('page-id-selector-panel');
+                const pageNameSelector = document.getElementById('page-name-selector');
+                const pageIdSelector = document.getElementById('page-id-selector');
+                const selectionResultTitle = document.getElementById('selection-result-title');
+                const selectionResultMode = document.getElementById('selection-result-mode');
+                const selectionResultDescription = document.getElementById('selection-result-description');
+                const selectionResultSection = document.getElementById('selection-result-section');
+
+                if (!toggleNameButton || !toggleIdButton || !nameSelectorPanel || !idSelectorPanel || !pageNameSelector || !pageIdSelector || !selectionResultTitle || !selectionResultMode || !selectionResultDescription || !selectionResultSection) {
+                    return;
+                }
+
+                function togglePanel(panelToToggle, ownButton, otherPanel, otherButton) {
+                    const isHidden = panelToToggle.hasAttribute('hidden');
+                    if (isHidden) {
+                        panelToToggle.removeAttribute('hidden');
+                        otherPanel.setAttribute('hidden', '');
+                        ownButton.textContent = 'Hide page list';
+                        otherButton.textContent = 'Select page to analyze';
+                    } else {
+                        panelToToggle.setAttribute('hidden', '');
+                        ownButton.textContent = 'Select page to analyze';
+                    }
+                }
+
+                function applySelection(modeLabel, selectedValue) {
+                    selectionResultTitle.textContent = 'Analyzing ' + selectedValue + ' page...';
+                    selectionResultMode.textContent = 'Selected via ' + modeLabel;
+                    selectionResultDescription.textContent = 'The explorer is now focused on ' + selectedValue + ' and the next section should load page-specific filters and results.';
+                    nameSelectorPanel.setAttribute('hidden', '');
+                    idSelectorPanel.setAttribute('hidden', '');
+                    toggleNameButton.textContent = 'Select page to analyze';
+                    toggleIdButton.textContent = 'Select page to analyze';
+                    selectionResultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+
+                toggleNameButton.addEventListener('click', function () {
+                    togglePanel(nameSelectorPanel, toggleNameButton, idSelectorPanel, toggleIdButton);
+                });
+
+                toggleIdButton.addEventListener('click', function () {
+                    togglePanel(idSelectorPanel, toggleIdButton, nameSelectorPanel, toggleNameButton);
+                });
+
+                pageNameSelector.addEventListener('change', function () {
+                    const selectedPage = pageNameSelector.value;
+                    if (selectedPage) {
+                        applySelection('page name', selectedPage);
+                    }
+                });
+
+                pageIdSelector.addEventListener('change', function () {
+                    const selectedPageId = pageIdSelector.value;
+                    if (selectedPageId) {
+                        applySelection('page id', selectedPageId);
+                    }
+                });
+            }());
+        </script>
+    </body>
+</html>

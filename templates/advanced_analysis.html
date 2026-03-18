@@ -1,0 +1,181 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+        <title>Advanced Analysis</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+        <link rel="stylesheet" href="../static/assets/css/main.css" />
+        <link rel="stylesheet" href="../static/assets/css/landing-dashboard.css" />
+        <noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
+    </head>
+    <body class="is-preload">
+        <div id="wrapper">
+            <header id="header" class="alt style2">
+                <a href="/" class="logo"><strong>Comment Lab</strong> <span>advanced analysis</span></a>
+                <nav>
+                    <a href="#menu">Menu</a>
+                </nav>
+            </header>
+
+            <nav id="menu">
+                <ul class="links">
+                    <li><a href="/">Home</a></li>
+                    <li><a href="/explorer">Explorer</a></li>
+                    <li><a href="/advanced-analysis">Advanced Analysis</a></li>
+                    <li><a href="/extractor">Extractor</a></li>
+                </ul>
+                <ul class="actions stacked">
+                    <li><a href="/advanced-analysis" class="button primary fit">Open advanced analysis</a></li>
+                    <li><a href="/explorer" class="button fit">Back to explorer</a></li>
+                </ul>
+            </nav>
+
+            <section id="banner" class="style2 dashboard-banner">
+                <div class="inner">
+                    <span class="image">
+                        <img src="../static/assets/images/pic09.jpg" alt="Advanced comment analysis" />
+                    </span>
+                    <header class="major">
+                        <h1>Advanced Analysis</h1>
+                    </header>
+                    <div class="content">
+                        <p>
+                            This page contains the heavier analysis controls, result-view catalog, and result surface.
+                        </p>
+                    </div>
+                    <div class="dashboard-hero-grid">
+                        <article class="hero-stat">
+                            <span class="eyebrow">Signed in</span>
+                            <strong>{{ current_user }}</strong>
+                            <span>Protected analysis area</span>
+                        </article>
+                        <article class="hero-stat">
+                            <span class="eyebrow">Focus</span>
+                            <strong>Deep analysis</strong>
+                            <span>Filters, views, exports, drill-down</span>
+                        </article>
+                        <article class="hero-stat">
+                            <span class="eyebrow">Entry point</span>
+                            <strong>Explorer page</strong>
+                            <span>Select the target page first</span>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <div id="main">
+                <section class="dashboard-section">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Explorer Controls</h2>
+                        </header>
+                        <div class="control-surface">
+                            <div class="control-column">
+                                <h3>Dataset scope</h3>
+                                <label for="page-id">Page ID</label>
+                                <input id="page-id" type="text" placeholder="tina_karol" />
+                                <label for="source">Source</label>
+                                <select id="source">
+                                    <option>Web interface</option>
+                                    <option>All sources</option>
+                                </select>
+                                <label for="likes">Minimum likes</label>
+                                <input id="likes" type="number" placeholder="0" />
+                            </div>
+                            <div class="control-column">
+                                <h3>Analysis mode</h3>
+                                <label for="view-mode">Primary view</label>
+                                <select id="view-mode">
+                                    {% for insight in insight_modules %}
+                                    <option>{{ insight.title }}</option>
+                                    {% endfor %}
+                                </select>
+                                <label for="language">Language filter</label>
+                                <select id="language">
+                                    <option>All</option>
+                                    <option>uk</option>
+                                    <option>ru</option>
+                                    <option>en</option>
+                                    <option>symbols_only</option>
+                                </select>
+                                <label for="sentiment">Sentiment filter</label>
+                                <select id="sentiment">
+                                    <option>All</option>
+                                    <option>positive</option>
+                                    <option>neutral</option>
+                                    <option>negative</option>
+                                </select>
+                            </div>
+                            <div class="control-column action-column">
+                                <h3>Result output</h3>
+                                <p>
+                                    The primary chart area should sit here, with the selected metric rendered from the
+                                    filtered dataset and synchronized with the details table below.
+                                </p>
+                                <div class="action-buttons">
+                                    <a href="/faq" class="button">How it works</a>
+                                    <a href="/elements" class="button primary">UI components</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dashboard-section alt-surface">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Available Result Views</h2>
+                        </header>
+                        <div class="insight-grid">
+                            {% for insight in insight_modules %}
+                            <article class="insight-card">
+                                <h3>{{ insight.title }}</h3>
+                                <p>{{ insight.description }}</p>
+                                <span class="insight-output">{{ insight.outputs }}</span>
+                            </article>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dashboard-section">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Result Surface</h2>
+                        </header>
+                        <div class="release-grid">
+                            {% for item in result_sections %}
+                            <article class="release-card">
+                                <p>{{ item }}</p>
+                            </article>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <footer id="footer">
+                <div class="inner">
+                    <ul class="icons">
+                        <li><a href="#" class="icon brands alt fa-instagram"><span class="label">Instagram</span></a></li>
+                        <li><a href="#" class="icon brands alt fa-github"><span class="label">GitHub</span></a></li>
+                    </ul>
+                    <ul class="copyright">
+                        <li>&copy; Comment Lab</li>
+                        <li>Advanced analysis workspace</li>
+                        <li><a href="/faq">FAQ</a></li>
+                        <li><a href="/elements">Elements</a></li>
+                    </ul>
+                </div>
+            </footer>
+        </div>
+
+        <script src="../static/assets/js/jquery.min.js"></script>
+        <script src="../static/assets/js/jquery.scrolly.min.js"></script>
+        <script src="../static/assets/js/jquery.scrollex.min.js"></script>
+        <script src="../static/assets/js/browser.min.js"></script>
+        <script src="../static/assets/js/breakpoints.min.js"></script>
+        <script src="../static/assets/js/util.js"></script>
+        <script src="../static/assets/js/main.js"></script>
+    </body>
+</html>

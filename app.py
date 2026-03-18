@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory
 from static.backend.extract_data import extract_data
 from static.backend.load_to_db import load_to_db
-from static.backend.db_connection import insert_new_user, fetch_user
+from static.backend.db_connection import insert_new_user, fetch_user, fetch_distinct_comment_dimensions
 import hashlib
 from flask_cors import CORS
 from flask_jwt_extended import (
@@ -119,12 +119,12 @@ def elements():
     return render_template('elements.html')
 
 
-@app.route('/generic')
+@app.route('/extractor')
 @jwt_required()
-def generic():
+def extractor():
     current_user = get_jwt_identity()
     logger.debug(f"Current user: {current_user}")
-    return render_template('generic.html')
+    return render_template('extractor.html')
 
 
 @app.route('/submit-form', methods=['POST'])
@@ -136,12 +136,158 @@ def submit_form():
     return jsonify({'message': 'Form submitted successfully!'}), 200
 
 
-@app.route('/landing')
+@app.route('/explorer')
 @jwt_required()
-def landing():
+def explorer():
     current_user = get_jwt_identity()
     logger.debug(f"Current user: {current_user}")
-    return render_template('landing.html')
+    page_dimensions = {"page_names": [], "page_ids": []}
+    page_loading_error = None
+    try:
+        page_dimensions = fetch_distinct_comment_dimensions()
+    except Exception as exc:
+        page_loading_error = str(exc)
+        logger.exception("Failed to load distinct page dimensions for explorer.")
+
+    return render_template(
+        'explorer.html',
+        current_user=current_user,
+        page_names=page_dimensions["page_names"],
+        page_ids=page_dimensions["page_ids"],
+        page_loading_error=page_loading_error,
+    )
+
+
+@app.route('/advanced-analysis')
+@jwt_required()
+def advanced_analysis():
+    current_user = get_jwt_identity()
+    logger.debug(f"Current user: {current_user}")
+    insight_modules = [
+        {
+            "title": "Language Mix",
+            "description": "Count comments by language to see audience composition for the selected dataset.",
+            "outputs": "Bar chart, share cards, language filter presets",
+        },
+        {
+            "title": "Sentiment by Language",
+            "description": "Compare positive, neutral, and negative comments inside each detected language.",
+            "outputs": "Stacked bars, ratio cards, raw comment sample panel",
+        },
+        {
+            "title": "Sentiment by Post",
+            "description": "Track how sentiment changes across post ids ordered by `PostTime`.",
+            "outputs": "Post comparison chart, sortable post table, best/worst post highlights",
+        },
+        {
+            "title": "Comment Length Analysis",
+            "description": "Measure how comment length relates to language and sentiment.",
+            "outputs": "Histogram, boxplots, outlier comments list",
+        },
+        {
+            "title": "Solidarity Index",
+            "description": "Reuse the current logic that compares comment sentiment with the first comment or post-description proxy.",
+            "outputs": "Per-post solidarity score, per-language distribution, median/mean summary",
+        },
+        {
+            "title": "Positivity Trend",
+            "description": "Follow the share of positive comments across posts and smooth it as a trend over time.",
+            "outputs": "Trend chart, language overlay, rolling positivity summary",
+        },
+    ]
+
+    result_sections = [
+        "Overview cards for comments, posts, latest load, and positivity share.",
+        "Primary visualization area with switchable analysis modes.",
+        "Drill-down table of posts or comments behind the selected chart.",
+        "Representative positive, neutral, and negative comment samples.",
+        "Export area for filtered comments and derived metrics.",
+    ]
+
+    return render_template(
+        'advanced_analysis.html',
+        current_user=current_user,
+        insight_modules=insight_modules,
+        result_sections=result_sections,
+    )
+
+
+@app.route('/faq')
+@jwt_required()
+def faq():
+    current_user = get_jwt_identity()
+    logger.debug(f"Current user: {current_user}")
+    schema_columns = [
+        {"name": "CommentHash", "role": "Primary key", "description": "Stable SHA-256 identifier used for deduplication and upserts."},
+        {"name": "PageName", "role": "Dimension", "description": "Display name of the Instagram page for grouping and filtering."},
+        {"name": "PageID", "role": "Dimension", "description": "Stable page handle used as the main entity key in the UI."},
+        {"name": "PostTime", "role": "Timeline anchor", "description": "Lets the interface build post-order and trend analysis over time."},
+        {"name": "Comment", "role": "Core text", "description": "Raw input for language detection, sentiment, and qualitative review."},
+        {"name": "CommentTime", "role": "Event time", "description": "Supports response windows, posting rhythm, and freshness filters."},
+        {"name": "CommentLikes", "role": "Engagement signal", "description": "Weights notable comments and highlights audience resonance."},
+        {"name": "LoadTime", "role": "Ingestion audit", "description": "Tracks when comments were loaded into the warehouse."},
+        {"name": "Source", "role": "Lineage", "description": "Separates web-ingested data from future loaders or imports."},
+        {"name": "UpdateTime", "role": "Change tracking", "description": "Indicates when an existing comment row was updated by MERGE."},
+    ]
+
+    pipeline_steps = [
+        {
+            "title": "1. Source Selection",
+            "module": "Comments table",
+            "description": "Select a page, period, source, and post window from the central table before any derived analysis runs.",
+        },
+        {
+            "title": "2. Language Processing",
+            "module": "process_data.py",
+            "description": "Detect the dominant language of each comment and keep only language-consistent text for downstream analysis.",
+        },
+        {
+            "title": "3. Sentiment Scoring",
+            "module": "analyze_data.py",
+            "description": "Run per-language sentiment models and label comments as positive, neutral, or negative.",
+        },
+        {
+            "title": "4. Dataset Assembly",
+            "module": "agregate_data.py",
+            "description": "Assign post-level ids, keep per-comment ordering, and build the combined dataset for comparisons.",
+        },
+        {
+            "title": "5. Insight Views",
+            "module": "visualize_data.py",
+            "description": "Render exploratory charts, solidarity analysis, positivity trends, and post-level drill-downs.",
+        },
+    ]
+
+    purpose_sections = [
+        {
+            "title": "What the explorer page is for",
+            "items": "Quick data exploration, filter selection, chart switching, and viewing the final analysis result.",
+        },
+        {
+            "title": "What the FAQ page is for",
+            "items": "Explain the source data, pipeline stages, available metrics, and how the workspace should evolve.",
+        },
+        {
+            "title": "Why keep them separate",
+            "items": "The analyst workspace stays focused, while the reference material remains available without cluttering the result screen.",
+        },
+    ]
+
+    implementation_notes = [
+        "Use the `Comments` table as the source of truth for filtering and retrieval.",
+        "Move heavy processing into explicit backend stages or precomputed tables.",
+        "Keep chart clicks connected to raw comments for validation.",
+        "Use the FAQ page as product and technical reference for future contributors.",
+    ]
+
+    return render_template(
+        'faq.html',
+        current_user=current_user,
+        schema_columns=schema_columns,
+        pipeline_steps=pipeline_steps,
+        purpose_sections=purpose_sections,
+        implementation_notes=implementation_notes,
+    )
 
 
 @app.route('/test')

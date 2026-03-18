@@ -1,0 +1,157 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+        <title>Comments FAQ</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+        <link rel="stylesheet" href="../static/assets/css/main.css" />
+        <link rel="stylesheet" href="../static/assets/css/landing-dashboard.css" />
+        <noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
+    </head>
+    <body class="is-preload">
+        <div id="wrapper">
+            <header id="header" class="alt style2">
+                <a href="/" class="logo"><strong>Comment Lab</strong> <span>faq</span></a>
+                <nav>
+                    <a href="#menu">Menu</a>
+                </nav>
+            </header>
+
+            <nav id="menu">
+                <ul class="links">
+                    <li><a href="/">Home</a></li>
+                    <li><a href="/explorer">Explorer</a></li>
+                    <li><a href="/advanced-analysis">Advanced Analysis</a></li>
+                    <li><a href="/extractor">Extractor</a></li>
+                </ul>
+                <ul class="actions stacked">
+                    <li><a href="/explorer" class="button primary fit">Open Explorer</a></li>
+                    <li><a href="/faq" class="button fit">Stay on FAQ</a></li>
+                </ul>
+            </nav>
+
+            <section id="banner" class="style2 dashboard-banner">
+                <div class="inner">
+                    <span class="image">
+                        <img src="../static/assets/images/pic08.jpg" alt="Comments FAQ" />
+                    </span>
+                    <header class="major">
+                        <h1>Comments FAQ</h1>
+                    </header>
+                    <div class="content">
+                        <p>
+                            This page stores the purpose, structure, and implementation logic behind the comments analysis workspace.
+                        </p>
+                    </div>
+                    <div class="dashboard-hero-grid">
+                        <article class="hero-stat">
+                            <span class="eyebrow">Workspace owner</span>
+                            <strong>{{ current_user }}</strong>
+                            <span>Authenticated reference area</span>
+                        </article>
+                        <article class="hero-stat">
+                            <span class="eyebrow">Primary source</span>
+                            <strong><code>Comments</code></strong>
+                            <span>Central table for the whole workflow</span>
+                        </article>
+                        <article class="hero-stat">
+                            <span class="eyebrow">Usage</span>
+                            <strong>Reference</strong>
+                            <span>Purpose, schema, pipeline, roadmap</span>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <div id="main">
+                <section class="dashboard-section">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Page Roles</h2>
+                        </header>
+                        <div class="release-grid">
+                            {% for section in purpose_sections %}
+                            <article class="release-card">
+                                <h3>{{ section.title }}</h3>
+                                <p>{{ section.items }}</p>
+                            </article>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dashboard-section alt-surface">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Comments Table Model</h2>
+                        </header>
+                        <div class="schema-grid">
+                            {% for column in schema_columns %}
+                            <article class="schema-card">
+                                <span class="schema-role">{{ column.role }}</span>
+                                <h3>{{ column.name }}</h3>
+                                <p>{{ column.description }}</p>
+                            </article>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dashboard-section">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Pipeline Built From Existing Modules</h2>
+                        </header>
+                        <div class="pipeline-grid">
+                            {% for step in pipeline_steps %}
+                            <article class="pipeline-card">
+                                <span class="module-chip">{{ step.module }}</span>
+                                <h3>{{ step.title }}</h3>
+                                <p>{{ step.description }}</p>
+                            </article>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dashboard-section implementation-surface">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Implementation Notes</h2>
+                        </header>
+                        <div class="release-grid">
+                            {% for note in implementation_notes %}
+                            <article class="release-card">
+                                <p>{{ note }}</p>
+                            </article>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <footer id="footer">
+                <div class="inner">
+                    <ul class="icons">
+                        <li><a href="#" class="icon brands alt fa-instagram"><span class="label">Instagram</span></a></li>
+                        <li><a href="#" class="icon brands alt fa-github"><span class="label">GitHub</span></a></li>
+                    </ul>
+                    <ul class="copyright">
+                        <li>&copy; Comment Lab</li>
+                        <li>Reference page for workspace purpose and structure</li>
+                        <li><a href="/faq">FAQ</a></li>
+                        <li><a href="/elements">Elements</a></li>
+                    </ul>
+                </div>
+            </footer>
+        </div>
+
+        <script src="../static/assets/js/jquery.min.js"></script>
+        <script src="../static/assets/js/jquery.scrolly.min.js"></script>
+        <script src="../static/assets/js/jquery.scrollex.min.js"></script>
+        <script src="../static/assets/js/browser.min.js"></script>
+        <script src="../static/assets/js/breakpoints.min.js"></script>
+        <script src="../static/assets/js/util.js"></script>
+        <script src="../static/assets/js/main.js"></script>
+    </body>
+</html>
