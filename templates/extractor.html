@@ -14,10 +14,27 @@
 		<noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
 		<style>
 			.processing-filters {
-				display: grid;
-				grid-template-columns: repeat(2, minmax(0, 1fr));
+				display: none;
+				grid-template-columns: minmax(0, 1fr) auto;
+				align-items: end;
 				gap: 1.5rem;
 				margin-bottom: 1.5rem;
+			}
+
+			.processing-filters.is-visible {
+				display: grid;
+			}
+
+			.processing-filter-field {
+				display: none;
+			}
+
+			.processing-filter-field.is-visible {
+				display: block;
+			}
+
+			.processing-submit {
+				min-width: 12rem;
 			}
 
 			.processing-actions {
@@ -197,14 +214,15 @@
 							</header>
 							<p>Select how the extracted data should be processed after the extraction step.</p>
 							<div class="processing-filters">
-								<div>
+								<div class="processing-filter-field" id="processing_page_name_field">
 									<label for="processing_page_name">Page name</label>
 									<input type="text" id="processing_page_name" placeholder="Used for Analyze by page name" />
 								</div>
-								<div>
+								<div class="processing-filter-field" id="processing_page_id_field">
 									<label for="processing_page_id">Page ID</label>
 									<input type="text" id="processing_page_id" placeholder="Used for Analyze by page ID" />
 								</div>
+								<button class="button processing-submit" id="processing_submit" type="button">Submit</button>
 							</div>
 							<div class="processing-actions">
 								<div class="processing-actions-top">
@@ -275,23 +293,56 @@
 				const analysisResultsSection = document.getElementById('analysis-results');
 				const analysisStatusText = document.getElementById('analysis-status-text');
 				const analysisResultOutput = document.getElementById('analysis-result-output');
+				const processingFilters = document.querySelector('.processing-filters');
 				const processingPageNameInput = document.getElementById('processing_page_name');
 				const processingPageIdInput = document.getElementById('processing_page_id');
+				const processingPageNameField = document.getElementById('processing_page_name_field');
+				const processingPageIdField = document.getElementById('processing_page_id_field');
+				const processingSubmitButton = document.getElementById('processing_submit');
 				const processingButtons = [
 					document.getElementById('analyze_page_name'),
 					document.getElementById('analyze_page_id'),
 					document.getElementById('analyze_whole_db'),
 					document.getElementById('analyze_delta')
 				];
+				let pendingAnalysisMode = null;
+				let pendingAnalysisLabel = null;
 
 				function setProcessingButtonsDisabled(disabled) {
 					processingButtons.forEach((button) => {
 						button.disabled = disabled;
 					});
+					processingSubmitButton.disabled = disabled;
 				}
 
 				function scrollToAnalysisResults() {
 					analysisResultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				}
+
+				function hideProcessingFilters() {
+					processingFilters.classList.remove('is-visible');
+					processingPageNameField.classList.remove('is-visible');
+					processingPageIdField.classList.remove('is-visible');
+					processingPageNameInput.value = '';
+					processingPageIdInput.value = '';
+					pendingAnalysisMode = null;
+					pendingAnalysisLabel = null;
+				}
+
+				function showProcessingFilters(mode, optionLabel) {
+					pendingAnalysisMode = mode;
+					pendingAnalysisLabel = optionLabel;
+					processingFilters.classList.add('is-visible');
+					processingPageNameField.classList.toggle('is-visible', mode === 'page_name');
+					processingPageIdField.classList.toggle('is-visible', mode === 'page_id');
+
+					if (mode === 'page_name') {
+						processingPageIdInput.value = '';
+						processingPageNameInput.focus();
+					} else {
+						processingPageNameInput.value = '';
+						processingPageIdInput.focus();
+					}
 				}
 
 				async function runAnalysis(mode, optionLabel) {
@@ -332,19 +383,29 @@
 				}
 
 				document.getElementById('analyze_page_name').addEventListener('click', () => {
-					runAnalysis('page_name', 'page name');
+					showProcessingFilters('page_name', 'page name');
 				});
 
 				document.getElementById('analyze_page_id').addEventListener('click', () => {
-					runAnalysis('page_id', 'page id');
+					showProcessingFilters('page_id', 'page id');
 				});
 
 				document.getElementById('analyze_whole_db').addEventListener('click', () => {
+					hideProcessingFilters();
 					runAnalysis('whole_db', 'whole db');
 				});
 
 				document.getElementById('analyze_delta').addEventListener('click', () => {
+					hideProcessingFilters();
 					runAnalysis('delta', 'delta');
+				});
+
+				processingSubmitButton.addEventListener('click', () => {
+					if (!pendingAnalysisMode) {
+						return;
+					}
+
+					runAnalysis(pendingAnalysisMode, pendingAnalysisLabel);
 				});
 
 				document.getElementById('start_execution').addEventListener('click', async () => {

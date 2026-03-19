@@ -364,6 +364,17 @@ def enrich_comments_endpoint():
         page_id = data.get('page_id')
 
         result = enrich_comments(mode=mode, page_name=page_name, page_id=page_id)
+        logger.info(
+            "enrich-comments finished: mode=%s selected=%s processed=%s added=%s updated=%s deleted=%s page_name=%s page_id=%s",
+            result.get('mode'),
+            result.get('selected'),
+            result.get('processed'),
+            result.get('added_count', 0),
+            result.get('updated_count', 0),
+            result.get('deleted', 0),
+            result.get('page_name'),
+            result.get('page_id'),
+        )
         return jsonify({'success': True, 'result': result}), 200
     except Exception as e:
         logger.exception("enrich-comments failed")

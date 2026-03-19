@@ -1,19 +1,34 @@
-from transformers import pipeline
-import pandas as pd
 import os
+import warnings
+from functools import lru_cache
+
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("USE_TORCH", "1")
+
+import pandas as pd
+from transformers import pipeline
 from static.backend.common_utils import get_next_filename, extract_sort_key
 
 
+warnings.filterwarnings(
+    "ignore",
+    message="`clean_up_tokenization_spaces` was not set.*",
+    category=FutureWarning,
+)
+
+
+@lru_cache(maxsize=1)
 def load_models():
     """
     Завантажує моделі для аналізу тональності залежно від мови.
     :return: словник із моделями для кожної мови
     """
     models = {
-        "uk": pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment"),
-        "ru": pipeline("sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment"),
-        "en": pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment"),
-        "symbols_only": pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment"),
+        "uk": pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment", framework="pt"),
+        "ru": pipeline("sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment", framework="pt"),
+        "en": pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment", framework="pt"),
+        "symbols_only": pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment", framework="pt"),
     }
     return models
 

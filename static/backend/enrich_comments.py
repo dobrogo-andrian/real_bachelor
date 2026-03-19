@@ -164,9 +164,9 @@ def prepare_enriched_rows(comment_rows, models, source):
     return enriched_rows
 
 
-def upsert_enriched_rows(conn, rows):
+def upsert_enriched_rows(conn, rows, allow_updates=True):
     if not rows:
-        return {"processed": 0, "added_count": 0}
+        return {"processed": 0, "added_count": 0, "updated_count": 0}
 
     cursor = conn.cursor()
     added_count = 0
@@ -240,6 +240,38 @@ def upsert_enriched_rows(conn, rows):
                 source.[Sentiment], source.[ProcessedTime], source.[Source]
             );
     """
+    insert_if_missing_sql = """
+        INSERT INTO [dbo].[EnrichedComments] (
+            [CommentHash], [PageName], [PageID], [PostTime], [Comment],
+            [CommentTime], [CommentLikes], [MainLanguage], [FilteredComment],
+            [Sentiment], [ProcessedTime], [Source]
+        )
+        SELECT
+            source.[CommentHash], source.[PageName], source.[PageID], source.[PostTime], source.[Comment],
+            source.[CommentTime], source.[CommentLikes], source.[MainLanguage], source.[FilteredComment],
+            source.[Sentiment], source.[ProcessedTime], source.[Source]
+        FROM (
+            SELECT
+                ? AS [CommentHash],
+                ? AS [PageName],
+                ? AS [PageID],
+                ? AS [PostTime],
+                ? AS [Comment],
+                ? AS [CommentTime],
+                ? AS [CommentLikes],
+                ? AS [MainLanguage],
+                ? AS [FilteredComment],
+                ? AS [Sentiment],
+                ? AS [ProcessedTime],
+                ? AS [Source]
+        ) AS source
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM [dbo].[EnrichedComments] AS target
+            WHERE target.[CommentHash] = source.[CommentHash]
+        );
+    """
+    updated_count = 0
     for row in rows:
         cursor.execute(
             "SELECT COUNT(1) FROM [dbo].[EnrichedComments] WHERE [CommentHash] = ?",
@@ -247,7 +279,7 @@ def upsert_enriched_rows(conn, rows):
         )
         existed_before = cursor.fetchone()[0] > 0
         cursor.execute(
-            merge_sql,
+            merge_sql if allow_updates else insert_if_missing_sql,
             (
                 row["CommentHash"],
                 row["PageName"],
@@ -263,11 +295,13 @@ def upsert_enriched_rows(conn, rows):
                 row["Source"],
             ),
         )
-        if not existed_before:
+        if not existed_before and cursor.rowcount > 0:
             added_count += 1
+        elif existed_before and allow_updates and cursor.rowcount > 0:
+            updated_count += 1
     conn.commit()
     cursor.close()
-    return {"processed": len(rows), "added_count": added_count}
+    return {"processed": len(rows), "added_count": added_count, "updated_count": updated_count}
 
 
 def enrich_comments(mode="whole_db", page_name=None, page_id=None):
@@ -286,11 +320,12 @@ def enrich_comments(mode="whole_db", page_name=None, page_id=None):
 
         models = load_models()
         enriched_rows = prepare_enriched_rows(comment_rows, models, source=mode)
-        upsert_stats = upsert_enriched_rows(conn, enriched_rows)
+        upsert_stats = upsert_enriched_rows(conn, enriched_rows, allow_updates=(mode != "delta"))
         return {
             "selected": len(comment_rows),
             "processed": upsert_stats["processed"],
             "added_count": upsert_stats["added_count"],
+            "updated_count": upsert_stats["updated_count"],
             "deleted": deleted_count,
             "mode": mode,
             "page_name": page_name,
