@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify, redirect, url_for, render_template, s
 from static.backend.extract_data import extract_data
 from static.backend.load_to_db import load_to_db
 from static.backend.enrich_comments import enrich_comments
+from static.backend.explorer_analysis import build_page_analysis
 from static.backend.db_connection import insert_new_user, fetch_user, fetch_distinct_comment_dimensions
 from flask_cors import CORS
 from flask_jwt_extended import (
@@ -378,6 +379,27 @@ def enrich_comments_endpoint():
         return jsonify({'success': True, 'result': result}), 200
     except Exception as e:
         logger.exception("enrich-comments failed")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/page-analysis', methods=['POST'])
+@jwt_required()
+def page_analysis_endpoint():
+    try:
+        data = request.json or {}
+        selection_type = data.get('selection_type')
+        selection_value = data.get('selection_value')
+        result = build_page_analysis(selection_type=selection_type, selection_value=selection_value)
+        logger.info(
+            "page-analysis finished: selection_type=%s selection_value=%s total_comments=%s posts=%s",
+            selection_type,
+            selection_value,
+            result.get('summary', {}).get('total_comments') if result.get('summary') else 0,
+            result.get('summary', {}).get('distinct_posts') if result.get('summary') else 0,
+        )
+        return jsonify({'success': True, 'result': result}), 200
+    except Exception as e:
+        logger.exception("page-analysis failed")
         return jsonify({'error': str(e)}), 500
 
 
