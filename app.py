@@ -1,18 +1,22 @@
+import os
+import logging
+import hashlib
+
+os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory
 from static.backend.extract_data import extract_data
 from static.backend.load_to_db import load_to_db
+from static.backend.enrich_comments import enrich_comments
 from static.backend.db_connection import insert_new_user, fetch_user, fetch_distinct_comment_dimensions
-import hashlib
 from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, create_refresh_token,
     jwt_required, get_jwt_identity, set_access_cookies, set_refresh_cookies,
     unset_jwt_cookies
 )
-import os
-import logging
-
-os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 
 app = Flask(__name__)
 app.config['JWT_SECRET_KEY'] = 'your-secret-key'
@@ -329,13 +333,14 @@ def process_data_endpoint():
 
 
         # Step 1: Load data
-        data = extract_data(instagram_username, instagram_password, target_page, number_of_posts)
+        extract_data(instagram_username, instagram_password, target_page, number_of_posts)
         logger.debug("Starting load_to_db after extract_data")
         load_to_db(dry_run=False)
         logger.debug("load_to_db finished")
 
         # # Step 2: Analyze data
         # analyzed_data = analyze_data(data)
+
         # # Step 3: Aggregate data
         # aggregated_data = aggregate_data(analyzed_data)
         # # Step 4: Process data
@@ -346,6 +351,22 @@ def process_data_endpoint():
             {'success': True, 'result': (target_page, number_of_posts, instagram_username, instagram_password)}), 200
     except Exception as e:
         logger.exception("process-data failed")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/enrich-comments', methods=['POST'])
+@jwt_required()
+def enrich_comments_endpoint():
+    try:
+        data = request.json or {}
+        mode = data.get('mode')
+        page_name = data.get('page_name')
+        page_id = data.get('page_id')
+
+        result = enrich_comments(mode=mode, page_name=page_name, page_id=page_id)
+        return jsonify({'success': True, 'result': result}), 200
+    except Exception as e:
+        logger.exception("enrich-comments failed")
         return jsonify({'error': str(e)}), 500
 
 

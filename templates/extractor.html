@@ -12,6 +12,100 @@
 		<link rel="stylesheet" href="../static/assets/css/main.css" />
 		<link rel="stylesheet" href="../static/assets/css/generic.css">
 		<noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
+		<style>
+			.processing-filters {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 1.5rem;
+				margin-bottom: 1.5rem;
+			}
+
+			.processing-actions {
+				display: flex;
+				flex-direction: column;
+				gap: 1.5rem;
+			}
+
+			.processing-actions-top {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 1fr));
+				gap: 1.5rem;
+			}
+
+			.processing-button {
+				appearance: none;
+				width: 100%;
+				min-height: 12rem;
+				border: 1px solid rgba(255, 255, 255, 0.15);
+				border-radius: 0.4rem;
+				padding: 1.25rem;
+				background: rgba(255, 255, 255, 0.03);
+				color: inherit;
+				cursor: pointer;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				gap: 1rem;
+				text-align: center;
+				transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+			}
+
+			.processing-button:hover {
+				background: rgba(255, 255, 255, 0.08);
+				border-color: rgba(255, 255, 255, 0.3);
+				transform: translateY(-2px);
+			}
+
+			.processing-button-title {
+				display: block;
+				font-size: 1rem;
+				font-weight: 700;
+				letter-spacing: 0.14em;
+				text-transform: uppercase;
+				line-height: 1.5;
+			}
+
+			.processing-button-text {
+				margin: 0;
+				font-size: 0.9rem;
+				line-height: 1.6;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				max-width: 24rem;
+				white-space: normal;
+			}
+
+			.processing-button-delta {
+				min-height: 14rem;
+			}
+
+			.analysis-status,
+			.analysis-result-box {
+				border: 1px solid rgba(255, 255, 255, 0.15);
+				border-radius: 0.4rem;
+				padding: 1.25rem;
+				background: rgba(255, 255, 255, 0.03);
+			}
+
+			.analysis-status {
+				margin-bottom: 1.5rem;
+				min-height: 5rem;
+			}
+
+			.analysis-result-box pre {
+				margin: 0;
+				white-space: pre-wrap;
+				word-break: break-word;
+			}
+
+			@media screen and (max-width: 736px) {
+				.processing-filters,
+				.processing-actions-top {
+					grid-template-columns: 1fr;
+				}
+			}
+		</style>
 	</head>
 	<body class="is-preload">
 
@@ -92,6 +186,60 @@
 									</div>
 								</section>
 							</section>
+
+						</div>
+					</section>
+
+					<section id="processing">
+						<div class="inner">
+							<header class="major">
+								<h2>Data processing</h2>
+							</header>
+							<p>Select how the extracted data should be processed after the extraction step.</p>
+							<div class="processing-filters">
+								<div>
+									<label for="processing_page_name">Page name</label>
+									<input type="text" id="processing_page_name" placeholder="Used for Analyze by page name" />
+								</div>
+								<div>
+									<label for="processing_page_id">Page ID</label>
+									<input type="text" id="processing_page_id" placeholder="Used for Analyze by page ID" />
+								</div>
+							</div>
+							<div class="processing-actions">
+								<div class="processing-actions-top">
+									<button class="processing-button" id="analyze_page_name" type="button">
+										<span class="processing-button-title">Analyze by page name</span>
+										<p class="processing-button-text">Process rows filtered by a specific page name.</p>
+									</button>
+									<button class="processing-button" id="analyze_page_id" type="button">
+										<span class="processing-button-title">Analyze by page ID</span>
+										<p class="processing-button-text">Process rows filtered by a specific page identifier.</p>
+									</button>
+									<button class="processing-button" id="analyze_whole_db" type="button">
+										<span class="processing-button-title">Analyze the whole DB</span>
+										<p class="processing-button-text">Run processing across the entire database without page-level filtering.</p>
+									</button>
+								</div>
+								<button class="processing-button processing-button-delta" id="analyze_delta" type="button">
+									<span class="processing-button-title">Load delta</span>
+									<p class="processing-button-text">Process only rows whose hash is missing in the second enriched table.</p>
+								</button>
+							</div>
+						</div>
+					</section>
+
+					<section id="analysis-results">
+						<div class="inner">
+							<header class="major">
+								<h2>Analysis results</h2>
+							</header>
+							<div class="analysis-status">
+								<p id="analysis-status-text">Choose a processing option to see the enrichment result here.</p>
+							</div>
+							<div class="analysis-result-box">
+								<pre id="analysis-result-output">No analysis has been started yet.</pre>
+							</div>
 						</div>
 					</section>
 
@@ -124,6 +272,81 @@
 			<script src=".././static/assets/js/util.js"></script>
 			<script src=".././static/assets/js/main.js"></script>
 			<script>
+				const analysisResultsSection = document.getElementById('analysis-results');
+				const analysisStatusText = document.getElementById('analysis-status-text');
+				const analysisResultOutput = document.getElementById('analysis-result-output');
+				const processingPageNameInput = document.getElementById('processing_page_name');
+				const processingPageIdInput = document.getElementById('processing_page_id');
+				const processingButtons = [
+					document.getElementById('analyze_page_name'),
+					document.getElementById('analyze_page_id'),
+					document.getElementById('analyze_whole_db'),
+					document.getElementById('analyze_delta')
+				];
+
+				function setProcessingButtonsDisabled(disabled) {
+					processingButtons.forEach((button) => {
+						button.disabled = disabled;
+					});
+				}
+
+				function scrollToAnalysisResults() {
+					analysisResultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				}
+
+				async function runAnalysis(mode, optionLabel) {
+					const payload = {
+						mode: mode,
+						page_name: processingPageNameInput.value.trim(),
+						page_id: processingPageIdInput.value.trim()
+					};
+
+					analysisStatusText.textContent = `we analysing ${optionLabel} please wait`;
+					analysisResultOutput.textContent = 'Processing...';
+					scrollToAnalysisResults();
+					setProcessingButtonsDisabled(true);
+
+					try {
+						const response = await fetch('/enrich-comments', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								'Accept': 'application/json'
+							},
+							body: JSON.stringify(payload)
+						});
+
+						const responseData = await response.json();
+						if (!response.ok) {
+							throw new Error(responseData.error || 'Failed to run enrichment.');
+						}
+
+						analysisStatusText.textContent = `Analysis completed for ${optionLabel}.`;
+						analysisResultOutput.textContent = JSON.stringify(responseData.result, null, 2);
+					} catch (error) {
+						analysisStatusText.textContent = `Analysis failed for ${optionLabel}.`;
+						analysisResultOutput.textContent = error.message;
+					} finally {
+						setProcessingButtonsDisabled(false);
+					}
+				}
+
+				document.getElementById('analyze_page_name').addEventListener('click', () => {
+					runAnalysis('page_name', 'page name');
+				});
+
+				document.getElementById('analyze_page_id').addEventListener('click', () => {
+					runAnalysis('page_id', 'page id');
+				});
+
+				document.getElementById('analyze_whole_db').addEventListener('click', () => {
+					runAnalysis('whole_db', 'whole db');
+				});
+
+				document.getElementById('analyze_delta').addEventListener('click', () => {
+					runAnalysis('delta', 'delta');
+				});
+
 				document.getElementById('start_execution').addEventListener('click', async () => {
 				  // Get input values
 				  const param1 = document.getElementById('instagram_page').value;
