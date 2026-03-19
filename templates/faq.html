@@ -128,6 +128,24 @@
                         </div>
                     </div>
                 </section>
+
+                <section class="dashboard-section alt-surface">
+                    <div class="inner">
+                        <header class="major">
+                            <h2>Advanced Analysis Reference</h2>
+                        </header>
+                        <div class="release-grid">
+                            {% for section in advanced_reference_sections %}
+                            <article class="release-card">
+                                <h3>{{ section.title }}</h3>
+                                {% for item in section.items %}
+                                <p>{{ item }}</p>
+                                {% endfor %}
+                            </article>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
             </div>
 
             <footer id="footer">

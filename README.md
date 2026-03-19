@@ -1,6 +1,6 @@
 # Real Bachelor Project
 
-Flask-based web app with an HTML frontend and a data pipeline that scrapes Instagram comments, cleans and labels them by language, runs sentiment analysis, aggregates results, and produces visualizations.
+Flask-based web app with an HTML frontend and a data pipeline that scrapes Instagram comments, enriches them with language and sentiment metadata, stores the results in SQL Server, and exposes explorer and advanced-analysis views.
 
 ## Stack
 - Backend: Flask, Flask-JWT-Extended, Flask-CORS
@@ -31,11 +31,10 @@ App will start on `http://localhost:5000`.
 
 ## Data Pipeline Flow
 1. Scrape comments: `static/backend/extract_data.py`
-2. Filter and label language: `static/backend/process_data.py`
-3. Sentiment analysis: `static/backend/analyze_data.py`
-4. Aggregate dataset: `static/backend/agregate_data.py`
-5. Visualize: `static/backend/visualize_data.py`
-6. (Optional) Load to DB: `static/backend/load_to_db.py`
+2. Load raw comments into SQL Server: `static/backend/load_to_db.py`
+3. Enrich comments with language and sentiment: `static/backend/enrich_comments.py`
+4. Build analysis structures: `static/backend/explorer_analysis.py`
+5. Explore and analyze through the Flask explorer and advanced-analysis pages
 
 ## Known Risks / TODO Highlights
 - JWT secret key is hardcoded.

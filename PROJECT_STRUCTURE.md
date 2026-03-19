@@ -5,17 +5,15 @@ This repository is a Flask-based web application with a static HTML frontend and
 ## High-Level Architecture
 - **Web app (Flask)**: `app.py` is the entrypoint; serves templates and JSON endpoints, manages JWT auth via cookies.
 - **Frontend (HTML/CSS/JS)**: `templates/` for pages and `static/assets/` for styles, images, JS (based on HTML5UP "Forty").
-- **Data pipeline scripts**: `static/backend/*.py` for scraping, cleaning, sentiment analysis, aggregation, and visualization.
+- **Data pipeline scripts**: `static/backend/*.py` for scraping, enrichment, loading, and analysis assembly.
 - **Database access**: `static/backend/db_connection.py` connects to a local SQL Server database for users.
 
 ## Key Entry Points
 - **`app.py`**: Flask app. Routes for login/signup/logout, JWT cookie refresh, static proxy, and data-processing endpoint.
 - **`static/backend/extract_data.py`**: Selenium-based scraper for Instagram comments; writes CSVs.
 - **`static/backend/load_to_db.py`**: Placeholder structure for loading extracted CSVs into the database.
-- **`static/backend/process_data.py`**: Cleans comments, detects main language, writes filtered CSVs.
-- **`static/backend/analyze_data.py`**: Sentiment analysis by language using Hugging Face transformers pipelines.
-- **`static/backend/agregate_data.py`**: Merges analyzed CSVs into a single dataset with IDs.
-- **`static/backend/visualize_data.py`**: Exploratory analysis and plots with seaborn/matplotlib.
+- **`static/backend/enrich_comments.py`**: Reads comment rows from SQL Server, normalizes text, detects language, scores sentiment, and upserts enriched rows.
+- **`static/backend/explorer_analysis.py`**: Builds page-level aggregates and chart-ready analysis structures from enriched comments.
 
 ## Repository Layout
 - `app.py`
@@ -28,10 +26,8 @@ This repository is a Flask-based web application with a static HTML frontend and
   - `backend/`
     - `extract_data.py` (scrape comments with Selenium)
     - `load_to_db.py` (DB load placeholders)
-    - `process_data.py` (language filtering/cleaning)
-    - `analyze_data.py` (sentiment analysis)
-    - `agregate_data.py` (dataset aggregation)
-    - `visualize_data.py` (EDA/plots)
+    - `enrich_comments.py` (language detection + sentiment enrichment)
+    - `explorer_analysis.py` (analysis assembly for explorer views)
     - `db_connection.py` (SQL Server user DB)
     - `auth/` (legacy JS auth logic)
     - `cookie/` (cookie pickle used by scraper)
@@ -53,11 +49,9 @@ This repository is a Flask-based web application with a static HTML frontend and
 
 ## Data Pipeline (Expected Flow)
 1. **Scrape**: `extract_data.py` uses Selenium to log in, find posts, and save comments to `static/backend/unprocessed_data/comments1/*.csv`.
-2. **Filter by language**: `process_data.py` reads raw CSVs, filters text, and writes to `language_marked_comments/...`.
-3. **Sentiment**: `analyze_data.py` loads transformer models and writes sentiment-labeled CSVs to `sentiment_analysis/...`.
-4. **Aggregate**: `agregate_data.py` merges CSVs into `final_dataset/.../combined_comments_*.csv`.
-5. **Visualize**: `visualize_data.py` reads the final dataset and produces plots.
-6. **Load to DB (optional)**: `load_to_db.py` provides placeholders for inserting extracted data into the database.
+2. **Enrich**: `enrich_comments.py` reads rows from `[dbo].[Comments]`, normalizes text, detects language, scores sentiment, and writes to `[dbo].[EnrichedComments]`.
+3. **Analyze**: `explorer_analysis.py` builds language, sentiment, solidarity, and trend views from the enriched table.
+4. **Load to DB (optional)**: `load_to_db.py` provides placeholders for inserting extracted CSVs into the database.
 
 ## Notable Implementation Details and Risks
 - **Side effects on import**: `static/backend/extract_data.py` ends with a call to `extract_data(...)` using hardcoded Instagram credentials. Importing this module will run the scraper immediately.

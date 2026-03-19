@@ -124,8 +124,55 @@ def fetch_enriched_comments_for_page(selection_type, selection_value):
         conn.close()
 
 
-def build_page_analysis(selection_type, selection_value):
-    rows = fetch_enriched_comments_for_page(selection_type, selection_value)
+def _build_chart_visibility(filters, rows, language_counts, sentiment_counts, ordered_posts):
+    distinct_pages = len({
+        _normalize_text(row.get("PageID")) or _normalize_text(row.get("PageName"))
+        for row in rows
+        if _normalize_text(row.get("PageID")) or _normalize_text(row.get("PageName"))
+    })
+    distinct_languages = len([language for language in language_counts if language])
+    distinct_sentiments = len([sentiment for sentiment in sentiment_counts if sentiment])
+    distinct_posts = len(ordered_posts)
+
+    has_language_filter = bool(_normalize_text((filters or {}).get("language")))
+    has_sentiment_filter = bool(_normalize_text((filters or {}).get("sentiment")))
+
+    visibility = {
+        "comments_by_post": distinct_posts > 1,
+        "comments_by_language": distinct_languages > 1 and not has_language_filter,
+        "sentiment_by_language": distinct_languages > 1 and distinct_sentiments > 1 and not (has_language_filter or has_sentiment_filter),
+        "sentiment_by_post": distinct_posts > 1 and distinct_sentiments > 1 and not has_sentiment_filter,
+        "comment_length_histogram": len(rows) > 1,
+        "avg_length_by_sentiment": distinct_sentiments > 1 and not has_sentiment_filter,
+        "avg_length_by_language_sentiment": distinct_languages > 1 and distinct_sentiments > 1 and not (has_language_filter or has_sentiment_filter),
+        "solidarity_distribution_by_language": distinct_posts > 1 and distinct_languages > 1 and not has_language_filter,
+        "positivity_trend_overall": distinct_posts > 1 and distinct_sentiments > 1 and not has_sentiment_filter,
+        "positivity_trend_by_language": distinct_posts > 1 and distinct_languages > 1 and distinct_sentiments > 1 and not (has_language_filter or has_sentiment_filter),
+    }
+
+    reasons = {}
+    if distinct_pages <= 1:
+        reasons["single_page_scope"] = "The current subset resolves to one page, so page-comparison charts are not needed."
+    if has_language_filter:
+        reasons["language_filter"] = "Language-comparison charts are hidden because the subset is already narrowed to one language."
+    if has_sentiment_filter:
+        reasons["sentiment_filter"] = "Sentiment-comparison charts are hidden because the subset is already narrowed to one sentiment."
+    if distinct_posts <= 1:
+        reasons["single_post_scope"] = "Post-level trend charts are hidden because fewer than two posts remain after filtering."
+
+    return {
+        "visible": visibility,
+        "meta": {
+            "distinct_pages": distinct_pages,
+            "distinct_languages": distinct_languages,
+            "distinct_sentiments": distinct_sentiments,
+            "distinct_posts": distinct_posts,
+        },
+        "reasons": reasons,
+    }
+
+
+def build_analysis_from_rows(rows, selection_type=None, selection_value=None, filters=None):
     if not rows:
         return {
             "selection_type": selection_type,
@@ -137,6 +184,8 @@ def build_page_analysis(selection_type, selection_value):
             "post_breakdown": [],
             "solidarity_breakdown": [],
             "sample_comments": [],
+            "charts": {},
+            "chart_visibility": {"visible": {}, "meta": {}, "reasons": {}},
         }
 
     first_row = rows[0]
@@ -407,6 +456,8 @@ def build_page_analysis(selection_type, selection_value):
         "latest_processed_time": latest_processed_time,
     }
 
+    chart_visibility = _build_chart_visibility(filters, rows, language_counts, sentiment_counts, ordered_posts)
+
     return {
         "selection_type": selection_type,
         "selection_value": selection_value,
@@ -419,4 +470,15 @@ def build_page_analysis(selection_type, selection_value):
         "solidarity_top_posts": top_solidarity_posts[:5],
         "sample_comments": sample_comments[:6],
         "charts": charts,
+        "chart_visibility": chart_visibility,
     }
+
+
+def build_page_analysis(selection_type, selection_value):
+    rows = fetch_enriched_comments_for_page(selection_type, selection_value)
+    return build_analysis_from_rows(
+        rows,
+        selection_type=selection_type,
+        selection_value=selection_value,
+        filters={selection_type: selection_value},
+    )

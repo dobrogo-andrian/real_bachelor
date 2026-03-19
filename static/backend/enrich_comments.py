@@ -1,19 +1,91 @@
 import argparse
+import os
+import re
+import unicodedata
+import warnings
 from datetime import datetime, timezone
+from functools import lru_cache
 
 import pyodbc
+from langdetect import detect_langs
+from transformers import pipeline
 
 from static.backend import db_connection
-from static.backend.old_apprach.analyze_data import analyze_sentiment, load_models
-from static.backend.old_apprach.process_data import (
-    detect_main_language,
-    filter_comment_by_main_language,
-    normalize_unicode,
-)
 
 
 SUPPORTED_LANGUAGES = {"uk", "ru", "en", "symbols_only"}
 DEFAULT_SENTIMENT = "neutral"
+
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("USE_TORCH", "1")
+
+warnings.filterwarnings(
+    "ignore",
+    message="`clean_up_tokenization_spaces` was not set.*",
+    category=FutureWarning,
+)
+
+
+def normalize_unicode(text):
+    return unicodedata.normalize("NFC", text)
+
+
+def detect_main_language(comment):
+    if all(not char.isalnum() for char in comment):
+        return "symbols_only"
+
+    try:
+        langs = detect_langs(comment)
+        main_language = max(langs, key=lambda lang: lang.prob).lang
+        return main_language if main_language in {"uk", "ru", "en"} else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def filter_comment_by_main_language(comment, main_language):
+    language_patterns = {
+        "uk": r"^[а-яА-ЯёЁіІїЇєЄґҐйЙ!?]+$",
+        "ru": r"^[а-яА-ЯёЁ!?]+$",
+        "en": r"^[a-zA-Z!?]+$",
+    }
+    allowed_pattern = language_patterns.get(main_language)
+    if not allowed_pattern:
+        return comment
+
+    filtered_words = [word for word in comment.split() if re.match(allowed_pattern, word)]
+    return " ".join(filtered_words)
+
+
+@lru_cache(maxsize=1)
+def load_models():
+    return {
+        "uk": pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment", framework="pt"),
+        "ru": pipeline("sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment", framework="pt"),
+        "en": pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment", framework="pt"),
+        "symbols_only": pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment", framework="pt"),
+    }
+
+
+def analyze_sentiment(comment, language, models):
+    if language not in models:
+        return DEFAULT_SENTIMENT
+
+    try:
+        result = models[language](comment)
+        label = str(result[0]["label"]).lower()
+        if label in {"label_0", "negative"}:
+            return "negative"
+        if label in {"label_1", "neutral"}:
+            return "neutral"
+        if label in {"label_2", "positive"}:
+            return "positive"
+    except Exception:
+        return DEFAULT_SENTIMENT
+
+    return DEFAULT_SENTIMENT
+
+
 def build_comment_query(mode, page_name=None, page_id=None):
     base_query = """
         SELECT

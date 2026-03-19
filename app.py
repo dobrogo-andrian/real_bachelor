@@ -10,8 +10,15 @@ from flask import Flask, request, jsonify, redirect, url_for, render_template, s
 from static.backend.extract_data import extract_data
 from static.backend.load_to_db import load_to_db
 from static.backend.enrich_comments import enrich_comments
-from static.backend.explorer_analysis import build_page_analysis
-from static.backend.db_connection import insert_new_user, fetch_user, fetch_distinct_comment_dimensions
+from static.backend.explorer_analysis import build_page_analysis, build_analysis_from_rows
+from static.backend.db_connection import (
+    insert_new_user,
+    fetch_user,
+    fetch_distinct_comment_dimensions,
+    fetch_advanced_comment_dimensions,
+    fetch_enriched_comment_preview,
+    fetch_enriched_comment_rows,
+)
 from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, create_refresh_token,
@@ -168,53 +175,67 @@ def explorer():
 def advanced_analysis():
     current_user = get_jwt_identity()
     logger.debug(f"Current user: {current_user}")
-    insight_modules = [
-        {
-            "title": "Language Mix",
-            "description": "Count comments by language to see audience composition for the selected dataset.",
-            "outputs": "Bar chart, share cards, language filter presets",
-        },
-        {
-            "title": "Sentiment by Language",
-            "description": "Compare positive, neutral, and negative comments inside each detected language.",
-            "outputs": "Stacked bars, ratio cards, raw comment sample panel",
-        },
-        {
-            "title": "Sentiment by Post",
-            "description": "Track how sentiment changes across post ids ordered by `PostTime`.",
-            "outputs": "Post comparison chart, sortable post table, best/worst post highlights",
-        },
-        {
-            "title": "Comment Length Analysis",
-            "description": "Measure how comment length relates to language and sentiment.",
-            "outputs": "Histogram, boxplots, outlier comments list",
-        },
-        {
-            "title": "Solidarity Index",
-            "description": "Reuse the current logic that compares comment sentiment with the first comment or post-description proxy.",
-            "outputs": "Per-post solidarity score, per-language distribution, median/mean summary",
-        },
-        {
-            "title": "Positivity Trend",
-            "description": "Follow the share of positive comments across posts and smooth it as a trend over time.",
-            "outputs": "Trend chart, language overlay, rolling positivity summary",
-        },
-    ]
-
-    result_sections = [
-        "Overview cards for comments, posts, latest load, and positivity share.",
-        "Primary visualization area with switchable analysis modes.",
-        "Drill-down table of posts or comments behind the selected chart.",
-        "Representative positive, neutral, and negative comment samples.",
-        "Export area for filtered comments and derived metrics.",
-    ]
+    advanced_dimensions = {
+        "page_names": [],
+        "page_ids": [],
+        "sources": [],
+        "languages": [],
+        "sentiments": [],
+        "ranges": {},
+    }
+    page_loading_error = None
+    try:
+        advanced_dimensions = fetch_advanced_comment_dimensions()
+    except Exception as exc:
+        page_loading_error = str(exc)
+        logger.exception("Failed to load advanced analysis dimensions.")
 
     return render_template(
         'advanced_analysis.html',
         current_user=current_user,
-        insight_modules=insight_modules,
-        result_sections=result_sections,
+        advanced_dimensions=advanced_dimensions,
+        page_loading_error=page_loading_error,
     )
+
+
+@app.route('/api/advanced-analysis/preview', methods=['POST'])
+@jwt_required()
+def advanced_analysis_preview():
+    payload = request.get_json(silent=True) or {}
+    logger.debug("Advanced analysis preview payload: %s", payload)
+    try:
+        preview = fetch_enriched_comment_preview(payload, limit=100)
+        analysis_rows = fetch_enriched_comment_rows(payload)
+        analysis = build_analysis_from_rows(
+            analysis_rows,
+            selection_type="advanced_filters",
+            selection_value="filtered_subset",
+            filters=payload,
+        )
+        preview["analysis"] = analysis
+        return jsonify(preview), 200
+    except Exception as exc:
+        logger.exception("Failed to fetch advanced analysis preview.")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route('/api/advanced-analysis/analyze', methods=['POST'])
+@jwt_required()
+def advanced_analysis_analyze():
+    payload = request.get_json(silent=True) or {}
+    logger.debug("Advanced analysis chart payload: %s", payload)
+    try:
+        analysis_rows = fetch_enriched_comment_rows(payload)
+        analysis = build_analysis_from_rows(
+            analysis_rows,
+            selection_type="advanced_filters",
+            selection_value="filtered_subset",
+            filters=payload,
+        )
+        return jsonify({"analysis": analysis}), 200
+    except Exception as exc:
+        logger.exception("Failed to build advanced analysis charts.")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route('/faq')
@@ -239,27 +260,27 @@ def faq():
         {
             "title": "1. Source Selection",
             "module": "Comments table",
-            "description": "Select a page, period, source, and post window from the central table before any derived analysis runs.",
+            "description": "Selects a page, period, source, and post window from the central table before any derived analysis runs.",
         },
         {
             "title": "2. Language Processing",
-            "module": "process_data.py",
-            "description": "Detect the dominant language of each comment and keep only language-consistent text for downstream analysis.",
+            "module": "enrich_comments.py",
+            "description": "Normalize comment text, detect the dominant language, and keep language-consistent text for downstream analysis.",
         },
         {
             "title": "3. Sentiment Scoring",
-            "module": "analyze_data.py",
-            "description": "Run per-language sentiment models and label comments as positive, neutral, or negative.",
+            "module": "enrich_comments.py",
+            "description": "Run the language-specific sentiment models and label comments as positive, neutral, or negative.",
         },
         {
             "title": "4. Dataset Assembly",
-            "module": "agregate_data.py",
-            "description": "Assign post-level ids, keep per-comment ordering, and build the combined dataset for comparisons.",
+            "module": "explorer_analysis.py",
+            "description": "Group enriched rows into post-level and language-level structures for comparisons and chart-ready outputs.",
         },
         {
             "title": "5. Insight Views",
-            "module": "visualize_data.py",
-            "description": "Render exploratory charts, solidarity analysis, positivity trends, and post-level drill-downs.",
+            "module": "explorer.html / advanced_analysis.html",
+            "description": "Render exploratory charts, direct row previews, and post-level drill-downs from the enriched dataset.",
         },
     ]
 
@@ -285,6 +306,26 @@ def faq():
         "Use the FAQ page as product and technical reference for future contributors.",
     ]
 
+    advanced_reference_sections = [
+        {
+            "title": "What this page adds beyond Explorer",
+            "items": [
+                "Direct Row Preview: inspect the actual enriched rows behind a filter set before building any derived view.",
+                "Segment Builder: combine page, source, language, sentiment, time, and text constraints in one workspace.",
+                "Query Handoff: use the filtered subset as the starting point for post-level, language, or sentiment analysis.",
+            ],
+        },
+        {
+            "title": "Possible downstream analysis",
+            "items": [
+                "Filter by page name or page id without going through the explorer selection flow.",
+                "Limit rows by source, language, sentiment, minimum likes, and post/comment time windows.",
+                "Search raw and filtered comment text to isolate a phrase, keyword, or narrative thread.",
+                "Preview the exact rows and summary counts that would feed downstream advanced analysis modules.",
+            ],
+        },
+    ]
+
     return render_template(
         'faq.html',
         current_user=current_user,
@@ -292,6 +333,7 @@ def faq():
         pipeline_steps=pipeline_steps,
         purpose_sections=purpose_sections,
         implementation_notes=implementation_notes,
+        advanced_reference_sections=advanced_reference_sections,
     )
 
 
