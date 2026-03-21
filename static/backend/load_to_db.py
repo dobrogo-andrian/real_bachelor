@@ -75,7 +75,7 @@ def prepare_rows(df, page_id, post_time, load_time):
 
 def insert_rows(conn, rows):
     if not rows:
-        return
+        return 0
 
     cursor = conn.cursor()
     cursor.fast_executemany = True
@@ -151,6 +151,7 @@ def insert_rows(conn, rows):
         ],
     )
     conn.commit()
+    return len(rows)
 
 
 def iter_csv_files(input_folder):
@@ -183,6 +184,9 @@ def load_to_db(input_folder="unprocessed_data", dry_run=True):
     if not dry_run:
         conn = db_connection.get_db_connection()
 
+    processed_files = 0
+    loaded_rows = 0
+
     try:
         for input_csv_path in input_files:
             filename = os.path.basename(input_csv_path)
@@ -196,16 +200,25 @@ def load_to_db(input_folder="unprocessed_data", dry_run=True):
             load_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
             rows = prepare_rows(df, page_id, post_time, load_time)
+            processed_files += 1
 
             if dry_run:
                 print(f"[DRY RUN] Prepared {len(rows)} rows from {input_csv_path}")
+                loaded_rows += len(rows)
                 continue
 
-            insert_rows(conn, rows)
+            loaded_rows += insert_rows(conn, rows)
             print(f"[INFO] Inserted {len(rows)} rows from {input_csv_path}")
     finally:
         if conn is not None:
             conn.close()
+
+    return {
+        "files_processed": processed_files,
+        "rows_loaded": loaded_rows,
+        "input_files_found": len(input_files),
+        "dry_run": dry_run,
+    }
 
 
 if __name__ == "__main__":

@@ -1,5 +1,49 @@
+import ctypes
 import pyodbc
 from flask import jsonify
+from ctypes import wintypes
+
+
+CRYPTPROTECT_UI_FORBIDDEN = 0x01
+
+
+class DATA_BLOB(ctypes.Structure):
+    _fields_ = [
+        ("cbData", wintypes.DWORD),
+        ("pbData", ctypes.POINTER(ctypes.c_byte)),
+    ]
+
+
+_crypt32 = ctypes.WinDLL("Crypt32.dll")
+_kernel32 = ctypes.WinDLL("Kernel32.dll")
+
+_crypt_protect_data = _crypt32.CryptProtectData
+_crypt_protect_data.argtypes = [
+    ctypes.POINTER(DATA_BLOB),
+    wintypes.LPCWSTR,
+    ctypes.POINTER(DATA_BLOB),
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    ctypes.POINTER(DATA_BLOB),
+]
+_crypt_protect_data.restype = wintypes.BOOL
+
+_crypt_unprotect_data = _crypt32.CryptUnprotectData
+_crypt_unprotect_data.argtypes = [
+    ctypes.POINTER(DATA_BLOB),
+    ctypes.POINTER(wintypes.LPWSTR),
+    ctypes.POINTER(DATA_BLOB),
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    ctypes.POINTER(DATA_BLOB),
+]
+_crypt_unprotect_data.restype = wintypes.BOOL
+
+_local_free = _kernel32.LocalFree
+_local_free.argtypes = [wintypes.HLOCAL]
+_local_free.restype = wintypes.HLOCAL
 
 
 def _normalize_filter_values(value):
@@ -27,6 +71,79 @@ def _add_in_filter(where_clauses, params, column_name, values):
     return normalized_values
 
 
+def _qualify_column(column_name, table_alias=None):
+    if table_alias:
+        return f"{table_alias}.[{column_name}]"
+    return f"[{column_name}]"
+
+
+def _add_in_filter_for_alias(where_clauses, params, column_name, values, table_alias=None):
+    normalized_values = _normalize_filter_values(values)
+    if not normalized_values:
+        return normalized_values
+    placeholders = ", ".join("?" for _ in normalized_values)
+    where_clauses.append(f"{_qualify_column(column_name, table_alias)} IN ({placeholders})")
+    params.extend(normalized_values)
+    return normalized_values
+
+
+def _add_first_comment_sentiment_filter(where_clauses, params, values, table_alias="EC"):
+    normalized_values = _normalize_filter_values(values)
+    if not normalized_values:
+        return normalized_values
+
+    placeholders = ", ".join("?" for _ in normalized_values)
+    current_page_id = _qualify_column("PageID", table_alias)
+    current_page_name = _qualify_column("PageName", table_alias)
+    current_post_time = _qualify_column("PostTime", table_alias)
+
+    where_clauses.append(f"""
+        EXISTS (
+            SELECT 1
+            FROM [dbo].[EnrichedComments] AS Anchor
+            WHERE
+                ISNULL(Anchor.[PageID], '') = ISNULL({current_page_id}, '')
+                AND ISNULL(Anchor.[PageName], '') = ISNULL({current_page_name}, '')
+                AND (
+                    (Anchor.[PostTime] = {current_post_time})
+                    OR (Anchor.[PostTime] IS NULL AND {current_post_time} IS NULL)
+                )
+                AND Anchor.[Sentiment] IN ({placeholders})
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM [dbo].[EnrichedComments] AS Earlier
+                    WHERE
+                        ISNULL(Earlier.[PageID], '') = ISNULL(Anchor.[PageID], '')
+                        AND ISNULL(Earlier.[PageName], '') = ISNULL(Anchor.[PageName], '')
+                        AND (
+                            (Earlier.[PostTime] = Anchor.[PostTime])
+                            OR (Earlier.[PostTime] IS NULL AND Anchor.[PostTime] IS NULL)
+                        )
+                        AND (
+                            CASE WHEN Earlier.[CommentTime] IS NULL THEN 1 ELSE 0 END
+                                < CASE WHEN Anchor.[CommentTime] IS NULL THEN 1 ELSE 0 END
+                            OR (
+                                CASE WHEN Earlier.[CommentTime] IS NULL THEN 1 ELSE 0 END
+                                    = CASE WHEN Anchor.[CommentTime] IS NULL THEN 1 ELSE 0 END
+                                AND (
+                                    Earlier.[CommentTime] < Anchor.[CommentTime]
+                                    OR (
+                                        (
+                                            (Earlier.[CommentTime] = Anchor.[CommentTime])
+                                            OR (Earlier.[CommentTime] IS NULL AND Anchor.[CommentTime] IS NULL)
+                                        )
+                                        AND Earlier.[CommentHash] < Anchor.[CommentHash]
+                                    )
+                                )
+                            )
+                        )
+                )
+        )
+    """)
+    params.extend(normalized_values)
+    return normalized_values
+
+
 def get_db_connection():
     conn = pyodbc.connect(
         'DRIVER={ODBC Driver 17 for SQL Server};'
@@ -38,7 +155,70 @@ def get_db_connection():
     return conn
 
 
-def insert_new_user(username, email, password):
+def _bytes_to_blob(value):
+    if not value:
+        return DATA_BLOB(0, None), None
+    buffer = (ctypes.c_byte * len(value))(*value)
+    return DATA_BLOB(len(value), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte))), buffer
+
+
+def protect_secret(plaintext):
+    if plaintext is None:
+        return None
+
+    payload = plaintext.encode("utf-16-le")
+    input_blob, input_buffer = _bytes_to_blob(payload)
+    output_blob = DATA_BLOB()
+
+    if not _crypt_protect_data(
+        ctypes.byref(input_blob),
+        "Comment Lab Instagram Credential",
+        None,
+        None,
+        None,
+        CRYPTPROTECT_UI_FORBIDDEN,
+        ctypes.byref(output_blob),
+    ):
+        raise ctypes.WinError()
+
+    try:
+        return ctypes.string_at(output_blob.pbData, output_blob.cbData)
+    finally:
+        if output_blob.pbData:
+            _local_free(output_blob.pbData)
+
+
+def unprotect_secret(ciphertext):
+    if ciphertext is None:
+        return None
+
+    payload = bytes(ciphertext)
+    input_blob, input_buffer = _bytes_to_blob(payload)
+    output_blob = DATA_BLOB()
+    description = wintypes.LPWSTR()
+
+    if not _crypt_unprotect_data(
+        ctypes.byref(input_blob),
+        ctypes.byref(description),
+        None,
+        None,
+        None,
+        CRYPTPROTECT_UI_FORBIDDEN,
+        ctypes.byref(output_blob),
+    ):
+        raise ctypes.WinError()
+
+    try:
+        plaintext_bytes = ctypes.string_at(output_blob.pbData, output_blob.cbData)
+        return plaintext_bytes.decode("utf-16-le")
+    finally:
+        if output_blob.pbData:
+            _local_free(output_blob.pbData)
+        if description:
+            _local_free(description)
+
+
+def insert_new_user(username, email, password, instagram_login, instagram_password):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -47,10 +227,13 @@ def insert_new_user(username, email, password):
         if existing_user:
             return jsonify({'error': 'Username or email already exists'}), 409
 
+        encrypted_instagram_login = protect_secret(instagram_login)
+        encrypted_instagram_password = protect_secret(instagram_password)
+
         cursor.execute('''
-            INSERT INTO Users (Username, PasswordHash, Email)
-            VALUES (?, ?, ?)
-        ''', (username, password, email))
+            INSERT INTO Users (Username, PasswordHash, Email, InstagramLoginEncrypted, InstagramPasswordEncrypted)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (username, password, email, pyodbc.Binary(encrypted_instagram_login), pyodbc.Binary(encrypted_instagram_password)))
         conn.commit()
 
         return jsonify({'message': 'User created successfully', 'redirect': '/login'}), 201
@@ -68,6 +251,31 @@ def fetch_user(username):
     cursor = conn.cursor()
     cursor.execute('SELECT PasswordHash FROM Users WHERE Username = ?', (username,))
     return cursor.fetchone()
+
+
+def fetch_user_instagram_credentials(username):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            '''
+            SELECT InstagramLoginEncrypted, InstagramPasswordEncrypted
+            FROM Users
+            WHERE Username = ?
+            ''',
+            (username,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        return {
+            "instagram_login": unprotect_secret(row[0]) if row[0] else None,
+            "instagram_password": unprotect_secret(row[1]) if row[1] else None,
+        }
+    finally:
+        cursor.close()
+        conn.close()
 
 
 def fetch_distinct_comment_dimensions():
@@ -144,6 +352,7 @@ def fetch_advanced_comment_dimensions():
             ORDER BY [Sentiment]
         """)
         dimensions["sentiments"] = [row[0] for row in cursor.fetchall()]
+        dimensions["first_comment_sentiments"] = list(dimensions["sentiments"])
 
         cursor.execute("""
             SELECT
@@ -178,11 +387,17 @@ def fetch_enriched_comment_preview(filters, limit=100):
         where_clauses = []
         params = []
 
-        page_names = _add_in_filter(where_clauses, params, "PageName", filters.get("page_name"))
-        page_ids = _add_in_filter(where_clauses, params, "PageID", filters.get("page_id"))
-        sources = _add_in_filter(where_clauses, params, "Source", filters.get("source"))
-        languages = _add_in_filter(where_clauses, params, "MainLanguage", filters.get("language"))
-        sentiments = _add_in_filter(where_clauses, params, "Sentiment", filters.get("sentiment"))
+        page_names = _add_in_filter_for_alias(where_clauses, params, "PageName", filters.get("page_name"), "EC")
+        page_ids = _add_in_filter_for_alias(where_clauses, params, "PageID", filters.get("page_id"), "EC")
+        sources = _add_in_filter_for_alias(where_clauses, params, "Source", filters.get("source"), "EC")
+        languages = _add_in_filter_for_alias(where_clauses, params, "MainLanguage", filters.get("language"), "EC")
+        sentiments = _add_in_filter_for_alias(where_clauses, params, "Sentiment", filters.get("sentiment"), "EC")
+        first_comment_sentiments = _add_first_comment_sentiment_filter(
+            where_clauses,
+            params,
+            filters.get("first_comment_sentiment"),
+            "EC",
+        )
         text_search = (filters.get("text_search") or "").strip()
         post_time_from = (filters.get("post_time_from") or "").strip()
         post_time_to = (filters.get("post_time_to") or "").strip()
@@ -190,22 +405,22 @@ def fetch_enriched_comment_preview(filters, limit=100):
         comment_time_to = (filters.get("comment_time_to") or "").strip()
         min_likes = filters.get("min_likes")
         if post_time_from:
-            where_clauses.append("[PostTime] >= ?")
+            where_clauses.append("EC.[PostTime] >= ?")
             params.append(post_time_from)
         if post_time_to:
-            where_clauses.append("[PostTime] <= ?")
+            where_clauses.append("EC.[PostTime] <= ?")
             params.append(post_time_to)
         if comment_time_from:
-            where_clauses.append("[CommentTime] >= ?")
+            where_clauses.append("EC.[CommentTime] >= ?")
             params.append(comment_time_from)
         if comment_time_to:
-            where_clauses.append("[CommentTime] <= ?")
+            where_clauses.append("EC.[CommentTime] <= ?")
             params.append(comment_time_to)
         if min_likes not in (None, ""):
-            where_clauses.append("ISNULL([CommentLikes], 0) >= ?")
+            where_clauses.append("ISNULL(EC.[CommentLikes], 0) >= ?")
             params.append(int(min_likes))
         if text_search:
-            where_clauses.append("([Comment] LIKE ? OR [FilteredComment] LIKE ?)")
+            where_clauses.append("(EC.[Comment] LIKE ? OR EC.[FilteredComment] LIKE ?)")
             like_pattern = f"%{text_search}%"
             params.extend([like_pattern, like_pattern])
 
@@ -219,7 +434,7 @@ def fetch_enriched_comment_preview(filters, limit=100):
                 COUNT(DISTINCT [PageID]) AS DistinctPages,
                 AVG(CAST(ISNULL([CommentLikes], 0) AS FLOAT)) AS AverageLikes,
                 MAX([ProcessedTime]) AS LatestProcessedTime
-            FROM [dbo].[EnrichedComments]
+            FROM [dbo].[EnrichedComments] AS EC
             {where_sql}
         """
         cursor.execute(summary_query, params)
@@ -240,9 +455,9 @@ def fetch_enriched_comment_preview(filters, limit=100):
                 [ProcessedTime],
                 [UpdateTime],
                 [Source]
-            FROM [dbo].[EnrichedComments]
+            FROM [dbo].[EnrichedComments] AS EC
             {where_sql}
-            ORDER BY [PostTime] DESC, [CommentTime] DESC, [CommentHash]
+            ORDER BY EC.[PostTime] DESC, EC.[CommentTime] DESC, EC.[CommentHash]
         """
         cursor.execute(preview_query, [int(limit)] + params)
         columns = [column[0] for column in cursor.description]
@@ -271,6 +486,7 @@ def fetch_enriched_comment_preview(filters, limit=100):
                     "source": sources,
                     "language": languages,
                     "sentiment": sentiments,
+                    "first_comment_sentiment": first_comment_sentiments,
                     "post_time_from": post_time_from,
                     "post_time_to": post_time_to,
                     "comment_time_from": comment_time_from,
@@ -292,11 +508,12 @@ def fetch_enriched_comment_rows(filters):
         where_clauses = []
         params = []
 
-        _add_in_filter(where_clauses, params, "PageName", filters.get("page_name"))
-        _add_in_filter(where_clauses, params, "PageID", filters.get("page_id"))
-        _add_in_filter(where_clauses, params, "Source", filters.get("source"))
-        _add_in_filter(where_clauses, params, "MainLanguage", filters.get("language"))
-        _add_in_filter(where_clauses, params, "Sentiment", filters.get("sentiment"))
+        _add_in_filter_for_alias(where_clauses, params, "PageName", filters.get("page_name"), "EC")
+        _add_in_filter_for_alias(where_clauses, params, "PageID", filters.get("page_id"), "EC")
+        _add_in_filter_for_alias(where_clauses, params, "Source", filters.get("source"), "EC")
+        _add_in_filter_for_alias(where_clauses, params, "MainLanguage", filters.get("language"), "EC")
+        _add_in_filter_for_alias(where_clauses, params, "Sentiment", filters.get("sentiment"), "EC")
+        _add_first_comment_sentiment_filter(where_clauses, params, filters.get("first_comment_sentiment"), "EC")
         text_search = (filters.get("text_search") or "").strip()
         post_time_from = (filters.get("post_time_from") or "").strip()
         post_time_to = (filters.get("post_time_to") or "").strip()
@@ -304,22 +521,22 @@ def fetch_enriched_comment_rows(filters):
         comment_time_to = (filters.get("comment_time_to") or "").strip()
         min_likes = filters.get("min_likes")
         if post_time_from:
-            where_clauses.append("[PostTime] >= ?")
+            where_clauses.append("EC.[PostTime] >= ?")
             params.append(post_time_from)
         if post_time_to:
-            where_clauses.append("[PostTime] <= ?")
+            where_clauses.append("EC.[PostTime] <= ?")
             params.append(post_time_to)
         if comment_time_from:
-            where_clauses.append("[CommentTime] >= ?")
+            where_clauses.append("EC.[CommentTime] >= ?")
             params.append(comment_time_from)
         if comment_time_to:
-            where_clauses.append("[CommentTime] <= ?")
+            where_clauses.append("EC.[CommentTime] <= ?")
             params.append(comment_time_to)
         if min_likes not in (None, ""):
-            where_clauses.append("ISNULL([CommentLikes], 0) >= ?")
+            where_clauses.append("ISNULL(EC.[CommentLikes], 0) >= ?")
             params.append(int(min_likes))
         if text_search:
-            where_clauses.append("([Comment] LIKE ? OR [FilteredComment] LIKE ?)")
+            where_clauses.append("(EC.[Comment] LIKE ? OR EC.[FilteredComment] LIKE ?)")
             like_pattern = f"%{text_search}%"
             params.extend([like_pattern, like_pattern])
 
@@ -339,13 +556,88 @@ def fetch_enriched_comment_rows(filters):
                 [ProcessedTime],
                 [UpdateTime],
                 [Source]
-            FROM [dbo].[EnrichedComments]
+            FROM [dbo].[EnrichedComments] AS EC
             {where_sql}
-            ORDER BY [PostTime], [CommentTime], [CommentHash]
+            ORDER BY EC.[PostTime], EC.[CommentTime], EC.[CommentHash]
         """
         cursor.execute(query, params)
         columns = [column[0] for column in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def fetch_post_anchor_sentiments(post_refs):
+    normalized_refs = []
+    seen = set()
+
+    for ref in post_refs or []:
+        page_id = (ref.get("page_id") or "").strip()
+        page_name = (ref.get("page_name") or "").strip()
+        post_time = ref.get("post_time")
+        if hasattr(post_time, "isoformat"):
+            post_time = post_time.isoformat(sep=" ")
+        post_time = (str(post_time).strip() if post_time is not None else "")
+
+        if not post_time:
+            continue
+
+        key = (page_id, page_name, post_time)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized_refs.append({
+            "page_id": page_id,
+            "page_name": page_name,
+            "post_time": post_time,
+        })
+
+    if not normalized_refs:
+        return {}
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        where_clauses = []
+        params = []
+
+        for ref in normalized_refs:
+            if ref["page_id"]:
+                where_clauses.append("([PageID] = ? AND [PostTime] = ?)")
+                params.extend([ref["page_id"], ref["post_time"]])
+            else:
+                where_clauses.append("([PageName] = ? AND [PostTime] = ?)")
+                params.extend([ref["page_name"], ref["post_time"]])
+
+        query = f"""
+            WITH RankedPostComments AS (
+                SELECT
+                    [PageName],
+                    [PageID],
+                    [PostTime],
+                    [Sentiment],
+                    ROW_NUMBER() OVER (
+                        PARTITION BY ISNULL([PageID], ''), ISNULL([PageName], ''), [PostTime]
+                        ORDER BY
+                            CASE WHEN [CommentTime] IS NULL THEN 1 ELSE 0 END,
+                            [CommentTime],
+                            [CommentHash]
+                    ) AS rn
+                FROM [dbo].[EnrichedComments]
+                WHERE {' OR '.join(where_clauses)}
+            )
+            SELECT [PageName], [PageID], [PostTime], [Sentiment]
+            FROM RankedPostComments
+            WHERE rn = 1
+        """
+
+        cursor.execute(query, params)
+        anchors = {}
+        for page_name, page_id, post_time, sentiment in cursor.fetchall():
+            post_key = f"{(page_id or '').strip()}|{(page_name or '').strip()}|{post_time.isoformat(sep=' ') if hasattr(post_time, 'isoformat') else str(post_time)}"
+            anchors[post_key] = (sentiment or "").strip().lower() or "unknown"
+        return anchors
     finally:
         cursor.close()
         conn.close()

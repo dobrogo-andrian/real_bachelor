@@ -518,7 +518,8 @@
                     const colors = options.colors;
                     const width = 620;
                     const height = 260;
-                    const padding = { top: 18, right: 18, bottom: 64, left: 42 };
+                    const topPadding = options.showSegmentValues ? 54 : 18;
+                    const padding = { top: topPadding, right: 18, bottom: 64, left: 42 };
                     const plotWidth = width - padding.left - padding.right;
                     const plotHeight = height - padding.top - padding.bottom;
                     const maxValue = Math.max(...items.map(function (item) {
@@ -552,13 +553,26 @@
                             const h = (value / maxValue) * plotHeight;
                             const y = padding.top + plotHeight - runningHeight - h;
                             runningHeight += h;
-                            return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${colors[key]}"></rect>`;
+                            return `
+                                <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${colors[key]}"></rect>
+                            `;
                         }).join('');
+                        const topLabelBaseY = padding.top + plotHeight - runningHeight - 6;
+                        const valueLabels = options.showSegmentValues
+                            ? keys.map(function (key, keyIndex) {
+                                const value = Number(item[key]) || 0;
+                                if (!value) {
+                                    return '';
+                                }
+                                return `<text x="${x + w / 2}" y="${Math.max(12, topLabelBaseY - (keyIndex * 12))}" text-anchor="middle" fill="${colors[key]}" font-size="10" font-weight="700">${value}</text>`;
+                            }).join('')
+                            : '';
 
                         return `
                             ${segments}
                             ${showLabel ? `<text x="${x + w / 2}" y="${padding.top + plotHeight + 18}" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="10">${escapeHtml(item.label)}</text>` : ''}
-                            <text x="${x + w / 2}" y="${padding.top + plotHeight - runningHeight - 6}" text-anchor="middle" fill="rgba(255,255,255,0.88)" font-size="10">${total}</text>
+                            ${valueLabels}
+                            ${options.showTotals === false ? '' : `<text x="${x + w / 2}" y="${padding.top + plotHeight - runningHeight - 6}" text-anchor="middle" fill="rgba(255,255,255,0.88)" font-size="10">${total}</text>`}
                         `;
                     }).join('');
 
@@ -732,7 +746,13 @@
                         </article>
                         <article class="analysis-chart-card">
                             <h3>Sentiment by language</h3>
-                            ${buildStackedBarChartSvg(charts.sentiment_by_language || [], { title: 'Sentiment by language', keys: ['positive', 'neutral', 'negative'], colors: sentimentColors })}
+                            ${buildStackedBarChartSvg(charts.sentiment_by_language || [], {
+                                title: 'Sentiment by language',
+                                keys: ['positive', 'neutral', 'negative'],
+                                colors: sentimentColors,
+                                showSegmentValues: true,
+                                showTotals: false
+                            })}
                             ${renderLegend([{ label: 'Positive', color: sentimentColors.positive }, { label: 'Neutral', color: sentimentColors.neutral }, { label: 'Negative', color: sentimentColors.negative }])}
                         </article>
                         <article class="analysis-chart-card span-two">

@@ -67,13 +67,23 @@
                 <section class="dashboard-section">
                     <div class="inner">
                         <header class="major">
-                            <h2>Page Roles</h2>
+                            <h2>Available Pages</h2>
                         </header>
-                        <div class="release-grid">
-                            {% for section in purpose_sections %}
-                            <article class="release-card">
-                                <h3>{{ section.title }}</h3>
-                                <p>{{ section.items }}</p>
+                        <div class="release-grid page-card-grid">
+                            {% for section in page_sections %}
+                            <article class="release-card page-card" data-order="{{ loop.index0 }}">
+                                <div class="page-card-primary">
+                                    <h3>{{ section.title }}</h3>
+                                    <p><strong>Route:</strong> <code>{{ section.route }}</code></p>
+                                    <p><strong>Access:</strong> {{ section.access }}</p>
+                                    <p class="page-summary">{{ section.summary }}</p>
+                                </div>
+                                <div class="page-card-details" hidden>
+                                {% for item in section.details %}
+                                <p>{{ item }}</p>
+                                {% endfor %}
+                                </div>
+                                <button class="button small page-card-toggle" type="button" aria-expanded="false">Extend</button>
                             </article>
                             {% endfor %}
                         </div>
@@ -83,10 +93,10 @@
                 <section class="dashboard-section alt-surface">
                     <div class="inner">
                         <header class="major">
-                            <h2>Comments Table Model</h2>
+                            <h2>FAQ Reference: Comments Table Model</h2>
                         </header>
                         <div class="schema-grid">
-                            {% for column in schema_columns %}
+                            {% for column in faq_reference.schema_columns %}
                             <article class="schema-card">
                                 <span class="schema-role">{{ column.role }}</span>
                                 <h3>{{ column.name }}</h3>
@@ -100,10 +110,10 @@
                 <section class="dashboard-section">
                     <div class="inner">
                         <header class="major">
-                            <h2>Pipeline Built From Existing Modules</h2>
+                            <h2>FAQ Reference: Pipeline</h2>
                         </header>
                         <div class="pipeline-grid">
-                            {% for step in pipeline_steps %}
+                            {% for step in faq_reference.pipeline_steps %}
                             <article class="pipeline-card">
                                 <span class="module-chip">{{ step.module }}</span>
                                 <h3>{{ step.title }}</h3>
@@ -117,10 +127,10 @@
                 <section class="dashboard-section implementation-surface">
                     <div class="inner">
                         <header class="major">
-                            <h2>Implementation Notes</h2>
+                            <h2>FAQ Reference: Implementation Notes</h2>
                         </header>
                         <div class="release-grid">
-                            {% for note in implementation_notes %}
+                            {% for note in faq_reference.implementation_notes %}
                             <article class="release-card">
                                 <p>{{ note }}</p>
                             </article>
@@ -132,21 +142,71 @@
                 <section class="dashboard-section alt-surface">
                     <div class="inner">
                         <header class="major">
-                            <h2>Advanced Analysis Reference</h2>
+                            <h2>FAQ Reference: Advanced Analysis Filters</h2>
                         </header>
                         <div class="release-grid">
-                            {% for section in advanced_reference_sections %}
+                            {% for filter_item in faq_reference.advanced_filters %}
                             <article class="release-card">
-                                <h3>{{ section.title }}</h3>
-                                {% for item in section.items %}
-                                <p>{{ item }}</p>
-                                {% endfor %}
+                                <h3>{{ filter_item.name }}</h3>
+                                <p>{{ filter_item.meaning }}</p>
                             </article>
                             {% endfor %}
                         </div>
                     </div>
                 </section>
             </div>
+
+            <section id="contact">
+                <div class="inner">
+                    <section>
+                        <form method="post" action="#">
+                            <div class="fields">
+                                <div class="field half">
+                                    <label for="name">Name</label>
+                                    <input type="text" name="name" id="name" />
+                                </div>
+                                <div class="field half">
+                                    <label for="email">Email</label>
+                                    <input type="text" name="email" id="email" />
+                                </div>
+                                <div class="field">
+                                    <label for="message">Message</label>
+                                    <textarea name="message" id="message" rows="6"></textarea>
+                                </div>
+                            </div>
+                            <ul class="actions">
+                                <li><input type="submit" value="Send Message" class="primary" /></li>
+                                <li><input type="reset" value="Clear" /></li>
+                            </ul>
+                        </form>
+                    </section>
+                    <section class="split">
+                        <section>
+                            <div class="contact-method">
+                                <span class="icon solid alt fa-envelope"></span>
+                                <h3>Email</h3>
+                                <a href="mailto:information@untitled.tld">information@untitled.tld</a>
+                            </div>
+                        </section>
+                        <section>
+                            <div class="contact-method">
+                                <span class="icon solid alt fa-phone"></span>
+                                <h3>Phone</h3>
+                                <span>(000) 000-0000 x12387</span>
+                            </div>
+                        </section>
+                        <section>
+                            <div class="contact-method">
+                                <span class="icon solid alt fa-home"></span>
+                                <h3>Address</h3>
+                                <span>1234 Somewhere Road #5432<br />
+                                Nashville, TN 00000<br />
+                                United States of America</span>
+                            </div>
+                        </section>
+                    </section>
+                </div>
+            </section>
 
             <footer id="footer">
                 <div class="inner">
@@ -171,5 +231,6 @@
         <script src="../static/assets/js/breakpoints.min.js"></script>
         <script src="../static/assets/js/util.js"></script>
         <script src="../static/assets/js/main.js"></script>
+        <script src="../static/backend/auth/faq.js"></script>
     </body>
 </html>

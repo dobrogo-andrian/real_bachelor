@@ -5,9 +5,11 @@ document.getElementById('signup-form').addEventListener('submit', async function
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value.trim();
   const confirmPassword = document.getElementById('confirmPassword').value.trim();
+  const instagramLogin = document.getElementById('instagramLogin').value.trim();
+  const instagramPassword = document.getElementById('instagramPassword').value;
   const errorMsg = document.getElementById('error-msg');
 
-  if (!username || !email || !password || !confirmPassword) {
+  if (!username || !email || !password || !confirmPassword || !instagramLogin || !instagramPassword) {
     errorMsg.textContent = 'Please fill out all fields.';
     errorMsg.style.display = 'block';
     return;
@@ -23,7 +25,13 @@ document.getElementById('signup-form').addEventListener('submit', async function
     const response = await fetch('http://localhost:5000/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, email, password }),
+      body: JSON.stringify({
+        username,
+        email,
+        password,
+        instagram_login: instagramLogin,
+        instagram_password: instagramPassword,
+      }),
     });
 
     const data = await response.json();

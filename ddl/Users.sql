@@ -3,6 +3,8 @@ CREATE TABLE [dbo].[Users](
     [Username] [nvarchar](50) NOT NULL,
     [PasswordHash] [nvarchar](255) NOT NULL,
     [Email] [nvarchar](100) NULL,
+    [InstagramLoginEncrypted] [varbinary](max) NULL,
+    [InstagramPasswordEncrypted] [varbinary](max) NULL,
 PRIMARY KEY CLUSTERED
 (
     [UserID] ASC

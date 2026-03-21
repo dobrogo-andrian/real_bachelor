@@ -470,6 +470,11 @@ def save_comments(driver, POST_URL, target_page, page_name):
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
     print(f"[INFO] Saved CSV: {output_path}")
+    return {
+        "output_path": output_path,
+        "comments_collected": len(comments_data),
+        "post_url": POST_URL,
+    }
 
 
 def find_scroll_elements_by_scroll_properties(driver, element_owner):
@@ -566,6 +571,10 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
     delete_previos_files()
     user_agent = UserAgent()
     log = ""
+    posts_requested = int(number_of_posts)
+    posts_loaded = 0
+    collected_comment_rows = 0
+    saved_files = []
     driver = setup_driver(user_agent)
     time.sleep(random.uniform(3, 5))
     driver.refresh()
@@ -590,14 +599,20 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
         if load_cookie_success:
             posts, page_name = load_all_posts(driver, target_page, number_of_posts)
             for i in posts:
-                save_comments(driver, i, target_page, page_name)
+                result = save_comments(driver, i, target_page, page_name)
+                posts_loaded += 1
+                collected_comment_rows += result["comments_collected"]
+                saved_files.append(result["output_path"])
         else:
             login_to_instagram(driver, USERNAME, PASSWORD)
             save_cookies(driver)
             if "/accounts/login/" not in driver.current_url:
                 posts, page_name = load_all_posts(driver, target_page, number_of_posts)
                 for i in posts:
-                    save_comments(driver, i, target_page, page_name)
+                    result = save_comments(driver, i, target_page, page_name)
+                    posts_loaded += 1
+                    collected_comment_rows += result["comments_collected"]
+                    saved_files.append(result["output_path"])
             else:
                 print(f"[WARN] Login failed: still at {driver.current_url}\n")
                 log += f"[WARN] Login failed: still at {driver.current_url}\n"  # Add failure log
@@ -610,7 +625,14 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
     finally:
         driver.quit()
 
-    return log
+    return {
+        "log": log,
+        "target_page": target_page,
+        "posts_requested": posts_requested,
+        "posts_loaded": posts_loaded,
+        "comments_collected": collected_comment_rows,
+        "saved_files": saved_files,
+    }
 
 
 if __name__ == "__main__":

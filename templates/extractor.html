@@ -185,15 +185,7 @@
 										<input type="text" id="instagram_page" required />
 										<label for="number_of_posts">Number of posts</label>
 										<input type="text" id="number_of_posts" required />
-									</div>
-								</section>
-								<section>
-									<div class="contact-method">
-										<span class="icon solid alt fa-home"></span>
-										<label for="user_login">Instagram login</label>
-										<input type="text" id="user_login" required />
-										<label for="user_password">Instagram password</label>
-										<input type="text" id="user_password" required />
+										<p>Instagram credentials will be taken from the account currently logged in to Comment Lab.</p>
 									</div>
 								</section>
 
@@ -330,6 +322,15 @@
 				}
 
 				function showProcessingFilters(mode, optionLabel) {
+					const isSameModeVisible =
+						processingFilters.classList.contains('is-visible') &&
+						pendingAnalysisMode === mode;
+
+					if (isSameModeVisible) {
+						hideProcessingFilters();
+						return;
+					}
+
 					pendingAnalysisMode = mode;
 					pendingAnalysisLabel = optionLabel;
 					processingFilters.classList.add('is-visible');
@@ -406,21 +407,18 @@
 					}
 
 					runAnalysis(pendingAnalysisMode, pendingAnalysisLabel);
+					hideProcessingFilters();
 				});
 
 				document.getElementById('start_execution').addEventListener('click', async () => {
 				  // Get input values
 				  const param1 = document.getElementById('instagram_page').value;
 				  const param2 = document.getElementById('number_of_posts').value;
-				  const param3 = document.getElementById('user_login').value;
-				  const param4 = document.getElementById('user_password').value;
 				  // Prepare the request payload
 				  const payload = {
 					params: {
 					  	param1: param1,
-					  	param2: param2,
-						param3: param3,
-						param4: param4
+					  	param2: param2
 					}
 				  };
 
@@ -431,6 +429,7 @@
 					  headers: {
 						'Content-Type': 'application/json'
 					  },
+					  credentials: 'include',
 					  body: JSON.stringify(payload)
 					});
 
@@ -439,7 +438,14 @@
 					  console.log('Response:', data);
 
 					  // Display the result
-					  document.getElementById('response-p').textContent = JSON.stringify(data.result, null, 2);
+					  document.getElementById('response-p').textContent = [
+                        `Target page: ${data.result.target_page}`,
+                        `Posts requested: ${data.result.posts_requested}`,
+                        `Posts successfully loaded: ${data.result.posts_loaded}`,
+                        `Comments collected: ${data.result.comments_collected}`,
+                        `Rows loaded into DB: ${data.result.rows_loaded_to_db}`,
+                        `CSV files processed: ${data.result.files_processed}`
+                      ].join('\n');
 					} else {
 					  const errorData = await response.json();
 					  console.error('Error:', errorData);

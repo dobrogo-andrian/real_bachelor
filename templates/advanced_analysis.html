@@ -425,6 +425,18 @@
                                         <p class="inline-note">Select one or several sentiment labels.</p>
                                     </div>
                                     <div>
+                                        <label for="first-comment-sentiment">Post description sentiment</label>
+                                        <div id="first-comment-sentiment" class="filter-checklist">
+                                            <label><input type="checkbox" name="first_comment_sentiment" value="__all__" checked /> <span>All</span></label>
+                                            {% for value in advanced_dimensions.first_comment_sentiments %}
+                                            <label><input type="checkbox" name="first_comment_sentiment" value="{{ value }}" /> <span>{{ value }}</span></label>
+                                            {% endfor %}
+                                        </div>
+                                        <p class="inline-note">Filter posts by the sentiment of the first comment, treated here as the post description anchor.</p>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div>
                                         <label for="min-likes">Minimum comment likes</label>
                                         <input
                                             id="min-likes"
@@ -622,7 +634,7 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
                 }
 
                 const payload = {};
-                const multiSelectNames = ['page_name', 'page_id', 'source', 'language', 'sentiment'];
+                const multiSelectNames = ['page_name', 'page_id', 'source', 'language', 'sentiment', 'first_comment_sentiment'];
 
                 multiSelectNames.forEach((name) => {
                     const values = Array.from(advancedQueryForm.querySelectorAll(`input[name="${name}"]:checked`))
@@ -659,6 +671,9 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
             function renderAppliedFilters(filters) {
                 appliedFiltersContainer.innerHTML = '';
                 const entries = Object.entries(filters || {});
+                const filterLabels = {
+                    first_comment_sentiment: 'post description sentiment'
+                };
                 if (!entries.length) {
                     appliedFiltersContainer.innerHTML = '<span class="chip">No filters applied</span>';
                     return;
@@ -667,7 +682,8 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
                 entries.forEach(([key, value]) => {
                     const chip = document.createElement('span');
                     chip.className = 'chip';
-                    chip.textContent = `${key}: ${Array.isArray(value) ? value.join(', ') : value}`;
+                    const label = filterLabels[key] || key;
+                    chip.textContent = `${label}: ${Array.isArray(value) ? value.join(', ') : value}`;
                     appliedFiltersContainer.appendChild(chip);
                 });
             }
@@ -1264,7 +1280,7 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
                 }));
             }
 
-            ['source', 'language', 'sentiment'].forEach((groupName) => {
+            ['source', 'language', 'sentiment', 'first_comment_sentiment'].forEach((groupName) => {
                 Array.from(document.querySelectorAll(`input[name="${groupName}"]`)).forEach((input) => {
                     input.addEventListener('change', () => {
                         syncAllOptionForGroup(groupName, input);
@@ -1298,7 +1314,7 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
                 });
             }
 
-            ['page_name', 'page_id', 'source', 'language', 'sentiment'].forEach((groupName) => {
+            ['page_name', 'page_id', 'source', 'language', 'sentiment', 'first_comment_sentiment'].forEach((groupName) => {
                 syncAllOptionForGroup(groupName);
             });
             syncPageSelectors();

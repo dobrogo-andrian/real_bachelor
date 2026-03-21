@@ -20,6 +20,10 @@
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.page-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .schema-grid,
 .pipeline-grid,
 .insight-grid {
@@ -182,6 +186,81 @@
     margin-bottom: 0;
 }
 
+.release-card p,
+.release-card code,
+.schema-card p,
+.pipeline-card p {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.release-card code,
+.schema-card code,
+.pipeline-card code {
+    white-space: normal;
+}
+
+.page-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    transform-origin: center top;
+    transition: transform 0.32s ease, border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+    will-change: transform;
+}
+
+.page-summary {
+    min-height: 7.5rem;
+}
+
+.page-card-details[hidden] {
+    display: none;
+}
+
+.page-card-toggle {
+    align-self: flex-start;
+    margin-top: auto;
+}
+
+.page-card-expanded {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.5fr);
+    align-items: start;
+    gap: 1.5rem 2rem;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(244, 211, 94, 0.45);
+    box-shadow: 0 1.25rem 2.5rem rgba(5, 8, 18, 0.28);
+}
+
+.page-card-primary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.page-card-expanded .page-summary {
+    min-height: 0;
+}
+
+.page-card-expanded .page-card-details {
+    display: block;
+}
+
+.page-card-expanded .page-card-toggle {
+    grid-column: 1 / -1;
+}
+
+@media screen and (max-width: 980px) {
+    .page-card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .page-card-expanded {
+        grid-template-columns: 1fr;
+    }
+}
+
 @media screen and (max-width: 736px) {
     .hero-stat,
     .workspace-panel,
@@ -192,5 +271,13 @@
     .implementation-grid article,
     .control-surface {
         padding: 1.2rem;
+    }
+
+    .page-card-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .page-summary {
+        min-height: 0;
     }
 }

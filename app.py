@@ -6,7 +6,7 @@ os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory
+from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory, make_response
 from static.backend.extract_data import extract_data
 from static.backend.load_to_db import load_to_db
 from static.backend.enrich_comments import enrich_comments
@@ -14,6 +14,7 @@ from static.backend.explorer_analysis import build_page_analysis, build_analysis
 from static.backend.db_connection import (
     insert_new_user,
     fetch_user,
+    fetch_user_instagram_credentials,
     fetch_distinct_comment_dimensions,
     fetch_advanced_comment_dimensions,
     fetch_enriched_comment_preview,
@@ -77,7 +78,9 @@ def login():
             next_url = '/'
 
         logger.debug(f"Rendering login page with next={next_url}")
-        return render_template('login.html', next_url=next_url)
+        response = make_response(render_template('login.html', next_url=next_url))
+        unset_jwt_cookies(response)
+        return response
 
     elif request.method == 'POST':
         data = request.json
@@ -243,97 +246,203 @@ def advanced_analysis_analyze():
 def faq():
     current_user = get_jwt_identity()
     logger.debug(f"Current user: {current_user}")
-    schema_columns = [
-        {"name": "CommentHash", "role": "Primary key", "description": "Stable SHA-256 identifier used for deduplication and upserts."},
-        {"name": "PageName", "role": "Dimension", "description": "Display name of the Instagram page for grouping and filtering."},
-        {"name": "PageID", "role": "Dimension", "description": "Stable page handle used as the main entity key in the UI."},
-        {"name": "PostTime", "role": "Timeline anchor", "description": "Lets the interface build post-order and trend analysis over time."},
-        {"name": "Comment", "role": "Core text", "description": "Raw input for language detection, sentiment, and qualitative review."},
-        {"name": "CommentTime", "role": "Event time", "description": "Supports response windows, posting rhythm, and freshness filters."},
-        {"name": "CommentLikes", "role": "Engagement signal", "description": "Weights notable comments and highlights audience resonance."},
-        {"name": "LoadTime", "role": "Ingestion audit", "description": "Tracks when comments were loaded into the warehouse."},
-        {"name": "Source", "role": "Lineage", "description": "Separates web-ingested data from future loaders or imports."},
-        {"name": "UpdateTime", "role": "Change tracking", "description": "Indicates when an existing comment row was updated by MERGE."},
-    ]
-
-    pipeline_steps = [
+    page_sections = [
         {
-            "title": "1. Source Selection",
-            "module": "Comments table",
-            "description": "Selects a page, period, source, and post window from the central table before any derived analysis runs.",
-        },
-        {
-            "title": "2. Language Processing",
-            "module": "enrich_comments.py",
-            "description": "Normalize comment text, detect the dominant language, and keep language-consistent text for downstream analysis.",
-        },
-        {
-            "title": "3. Sentiment Scoring",
-            "module": "enrich_comments.py",
-            "description": "Run the language-specific sentiment models and label comments as positive, neutral, or negative.",
-        },
-        {
-            "title": "4. Dataset Assembly",
-            "module": "explorer_analysis.py",
-            "description": "Group enriched rows into post-level and language-level structures for comparisons and chart-ready outputs.",
-        },
-        {
-            "title": "5. Insight Views",
-            "module": "explorer.html / advanced_analysis.html",
-            "description": "Render exploratory charts, direct row previews, and post-level drill-downs from the enriched dataset.",
-        },
-    ]
-
-    purpose_sections = [
-        {
-            "title": "What the explorer page is for",
-            "items": "Quick data exploration, filter selection, chart switching, and viewing the final analysis result.",
-        },
-        {
-            "title": "What the FAQ page is for",
-            "items": "Explain the source data, pipeline stages, available metrics, and how the workspace should evolve.",
-        },
-        {
-            "title": "Why keep them separate",
-            "items": "The analyst workspace stays focused, while the reference material remains available without cluttering the result screen.",
-        },
-    ]
-
-    implementation_notes = [
-        "Use the `Comments` table as the source of truth for filtering and retrieval.",
-        "Move heavy processing into explicit backend stages or precomputed tables.",
-        "Keep chart clicks connected to raw comments for validation.",
-        "Use the FAQ page as product and technical reference for future contributors.",
-    ]
-
-    advanced_reference_sections = [
-        {
-            "title": "What this page adds beyond Explorer",
-            "items": [
-                "Direct Row Preview: inspect the actual enriched rows behind a filter set before building any derived view.",
-                "Segment Builder: combine page, source, language, sentiment, time, and text constraints in one workspace.",
-                "Query Handoff: use the filtered subset as the starting point for post-level, language, or sentiment analysis.",
+            "title": "Home",
+            "route": "/",
+            "access": "Public",
+            "summary": "Landing page for the whole workspace. It introduces the product, links to every main page, and reflects whether the visitor is already authenticated.",
+            "details": [
+                "Shows the current workspace scope: extractor, explorer, advanced analysis, FAQ, signup, and login.",
+                "Detects an existing session from the browser and replaces login prompts with a logged-in indicator.",
+                "Acts as the safest re-entry point when a user is deciding which workflow page to open next.",
             ],
         },
         {
-            "title": "Possible downstream analysis",
-            "items": [
-                "Filter by page name or page id without going through the explorer selection flow.",
-                "Limit rows by source, language, sentiment, minimum likes, and post/comment time windows.",
-                "Search raw and filtered comment text to isolate a phrase, keyword, or narrative thread.",
-                "Preview the exact rows and summary counts that would feed downstream advanced analysis modules.",
+            "title": "Login",
+            "route": "/login",
+            "access": "Public",
+            "summary": "Authentication entry page for application users. Opening this page also resets any existing JWT cookie session before showing the form.",
+            "details": [
+                "Accepts the application username and password stored in the `Users` table.",
+                "Uses the `next` query parameter to return the user to the protected page they originally requested.",
+                "Always clears the current session on page load so the login form starts from a clean authentication state.",
+            ],
+        },
+        {
+            "title": "Sign Up",
+            "route": "/signup",
+            "access": "Public",
+            "summary": "Account creation page for new operators. It creates the application account and stores encrypted Instagram credentials for later extraction jobs.",
+            "details": [
+                "Collects username, email, application password, Instagram login, and Instagram password.",
+                "Hashes the application password before storage and protects Instagram credentials with reversible encryption.",
+                "Prepares the user record so later workflows can use saved Instagram credentials without storing them as plaintext.",
+            ],
+        },
+        {
+            "title": "Extractor",
+            "route": "/extractor",
+            "access": "Authenticated",
+            "summary": "Data ingestion page. It is responsible for starting the Instagram extraction flow and loading new comments into the database.",
+            "details": [
+                "Accepts a target page, number of posts, and Instagram credentials for the extraction session.",
+                "Calls the backend extraction script and then loads the result into SQL Server through `load_to_db`.",
+                "Should be used first whenever fresh comments are needed before any analytical work can begin.",
+            ],
+        },
+        {
+            "title": "Explorer",
+            "route": "/explorer",
+            "access": "Authenticated",
+            "summary": "Primary analysis page for page-level exploration. It lets the user select a page, run analysis, and inspect result summaries built from the warehouse.",
+            "details": [
+                "Loads distinct page names and page ids from the `Comments` table.",
+                "Focuses on guided exploration rather than arbitrary row-level filtering.",
+                "Works best when the user already knows which Instagram page or page id they want to review.",
+            ],
+        },
+        {
+            "title": "Advanced Analysis",
+            "route": "/advanced-analysis",
+            "access": "Authenticated",
+            "summary": "Detailed filter workspace for enriched comments. It goes beyond Explorer by allowing direct row preview and more granular segment construction.",
+            "details": [
+                "Supports combined filtering by page name, page id, source, language, sentiment, likes, time windows, and text search.",
+                "Returns both row previews and aggregated analysis derived from the filtered subset.",
+                "Is the right page when the user needs precise slices of the dataset instead of a broader page-level overview.",
+            ],
+        },
+        {
+            "title": "FAQ",
+            "route": "/faq",
+            "access": "Authenticated",
+            "summary": "Reference page for the entire application. It documents what every page does, how the data model is structured, and how the processing pipeline is organized.",
+            "details": [
+                "Keeps product and technical reference material separate from the live analysis workflows.",
+                "Documents the shared source tables, enrichment stages, and intended responsibilities of each page.",
+                "Also contains the contact section for questions, handoff notes, or future maintenance work.",
+            ],
+        },
+        {
+            "title": "Elements",
+            "route": "/elements",
+            "access": "Authenticated",
+            "summary": "Template support page inherited from the base theme. It is not part of the main analysis workflow but remains available as a design and component reference.",
+            "details": [
+                "Useful when comparing existing UI components from the HTML template.",
+                "Can be removed later if the project no longer needs the theme reference page.",
+                "Should not be presented as a core analytical step for end users.",
+            ],
+        },
+        {
+            "title": "Test",
+            "route": "/test",
+            "access": "Public",
+            "summary": "Utility page for local experiments and temporary checks. It is not a documented end-user workflow page.",
+            "details": [
+                "Can be used for isolated frontend or backend verification during development.",
+                "Should stay clearly separated from the production-facing navigation.",
+                "May be removed or repurposed once its temporary development value is gone.",
             ],
         },
     ]
+
+    faq_reference = {
+        "schema_columns": [
+            {"name": "CommentHash", "role": "Primary key", "description": "Stable SHA-256 identifier used for deduplication and upserts."},
+            {"name": "PageName", "role": "Dimension", "description": "Display name of the Instagram page for grouping and filtering."},
+            {"name": "PageID", "role": "Dimension", "description": "Stable page handle used as the main entity key in the UI."},
+            {"name": "PostTime", "role": "Timeline anchor", "description": "Lets the interface build post-order and trend analysis over time."},
+            {"name": "Comment", "role": "Core text", "description": "Raw input for language detection, sentiment, and qualitative review."},
+            {"name": "CommentTime", "role": "Event time", "description": "Supports response windows, posting rhythm, and freshness filters."},
+            {"name": "CommentLikes", "role": "Engagement signal", "description": "Weights notable comments and highlights audience resonance."},
+            {"name": "LoadTime", "role": "Ingestion audit", "description": "Tracks when comments were loaded into the warehouse."},
+            {"name": "Source", "role": "Lineage", "description": "Separates web-ingested data from future loaders or imports."},
+            {"name": "UpdateTime", "role": "Change tracking", "description": "Indicates when an existing comment row was updated by MERGE."},
+        ],
+        "pipeline_steps": [
+            {
+                "title": "1. Source Selection",
+                "module": "Comments table",
+                "description": "Select a page, period, source, and post window from the central table before any derived analysis runs.",
+            },
+            {
+                "title": "2. Language Processing",
+                "module": "enrich_comments.py",
+                "description": "Normalize comment text, detect the dominant language, and prepare consistent text for downstream analysis.",
+            },
+            {
+                "title": "3. Sentiment Scoring",
+                "module": "enrich_comments.py",
+                "description": "Run the language-specific sentiment models and classify comments as positive, neutral, or negative.",
+            },
+            {
+                "title": "4. Dataset Assembly",
+                "module": "explorer_analysis.py",
+                "description": "Group enriched rows into post-level and language-level structures for chart-ready output.",
+            },
+            {
+                "title": "5. Insight Views",
+                "module": "explorer.html / advanced_analysis.html",
+                "description": "Render exploratory charts, direct row previews, and drill-downs from the enriched dataset.",
+            },
+        ],
+        "implementation_notes": [
+            "Use the `Comments` table as the source of truth for filtering and retrieval.",
+            "Move heavy processing into explicit backend stages or precomputed tables.",
+            "Keep chart clicks connected to raw comments for validation.",
+            "Use the FAQ page as product and technical reference for future contributors.",
+        ],
+        "advanced_filters": [
+            {
+                "name": "Page name",
+                "meaning": "Restricts the dataset to one or more display names from `EnrichedComments.PageName`.",
+            },
+            {
+                "name": "Page id",
+                "meaning": "Restricts the dataset to one or more stable page identifiers from `EnrichedComments.PageID`.",
+            },
+            {
+                "name": "Source",
+                "meaning": "Keeps only rows loaded from the selected ingestion source or loader lineage value.",
+            },
+            {
+                "name": "Main language",
+                "meaning": "Limits rows to comments whose detected dominant language matches the selected values.",
+            },
+            {
+                "name": "Sentiment",
+                "meaning": "Filters individual comments by their own sentiment label: positive, neutral, or negative.",
+            },
+            {
+                "name": "Post description sentiment",
+                "meaning": "Filters posts by the sentiment of the first comment in the full unfiltered post, used as the post anchor.",
+            },
+            {
+                "name": "Minimum comment likes",
+                "meaning": "Keeps only comments whose `CommentLikes` value is greater than or equal to the chosen threshold.",
+            },
+            {
+                "name": "Post time from / to",
+                "meaning": "Restricts the subset by the publication time of the post itself, not the comment time.",
+            },
+            {
+                "name": "Comment time from / to",
+                "meaning": "Restricts the subset by when the comment was created, useful for response-window analysis.",
+            },
+            {
+                "name": "Comment text search",
+                "meaning": "Matches rows where the raw comment text or filtered comment text contains the given phrase or keyword.",
+            },
+        ],
+    }
 
     return render_template(
         'faq.html',
         current_user=current_user,
-        schema_columns=schema_columns,
-        pipeline_steps=pipeline_steps,
-        purpose_sections=purpose_sections,
-        implementation_notes=implementation_notes,
-        advanced_reference_sections=advanced_reference_sections,
+        page_sections=page_sections,
+        faq_reference=faq_reference,
     )
 
 
@@ -352,33 +461,44 @@ def signup():
         username = data.get('username')
         password = data.get('password')
         email = data.get('email')
+        instagram_login = data.get('instagram_login')
+        instagram_password = data.get('instagram_password')
 
-        if not username or not password or not email:
+        if not username or not password or not email or not instagram_login or not instagram_password:
             return jsonify({'error': 'All fields are required'}), 400
 
         password_hash = hashlib.sha256(password.encode()).hexdigest()
 
-        insert_new_user(username, email, password_hash)
+        return insert_new_user(username, email, password_hash, instagram_login, instagram_password)
     return None
 
 
 @app.route('/process-data', methods=['POST'])
+@jwt_required()
 def process_data_endpoint():
     try:
+        current_user = get_jwt_identity()
         params = request.json.get('params', {})
         target_page = params["param1"]
         number_of_posts = int(params["param2"])
-        instagram_username = params["param3"]
-        instagram_password = params["param4"]
 
         if not params:
             return jsonify({'error': 'No parameters provided.'}), 400
 
+        instagram_credentials = fetch_user_instagram_credentials(current_user)
+        if not instagram_credentials:
+            return jsonify({'error': 'Logged in user was not found.'}), 404
+
+        instagram_username = instagram_credentials.get('instagram_login')
+        instagram_password = instagram_credentials.get('instagram_password')
+
+        if not instagram_username or not instagram_password:
+            return jsonify({'error': 'Instagram credentials are missing for the logged in user.'}), 400
 
         # Step 1: Load data
-        extract_data(instagram_username, instagram_password, target_page, number_of_posts)
+        extraction_result = extract_data(instagram_username, instagram_password, target_page, number_of_posts)
         logger.debug("Starting load_to_db after extract_data")
-        load_to_db(dry_run=False)
+        load_result = load_to_db(dry_run=False)
         logger.debug("load_to_db finished")
 
         # # Step 2: Analyze data
@@ -391,7 +511,18 @@ def process_data_endpoint():
 
         # Return the final result to the frontend
         return jsonify(
-            {'success': True, 'result': (target_page, number_of_posts, instagram_username, instagram_password)}), 200
+            {
+                'success': True,
+                'result': {
+                    'target_page': target_page,
+                    'posts_requested': number_of_posts,
+                    'posts_loaded': extraction_result.get('posts_loaded', 0),
+                    'comments_collected': extraction_result.get('comments_collected', 0),
+                    'rows_loaded_to_db': load_result.get('rows_loaded', 0),
+                    'files_processed': load_result.get('files_processed', 0),
+                }
+            }
+        ), 200
     except Exception as e:
         logger.exception("process-data failed")
         return jsonify({'error': str(e)}), 500

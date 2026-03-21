@@ -24,6 +24,15 @@ def _normalize_text(value):
     return str(value).strip()
 
 
+def _build_post_key(page_id, page_name, post_time):
+    normalized_post_time = _normalize_datetime(post_time)
+    if normalized_post_time:
+        post_time_value = normalized_post_time.isoformat(sep=" ")
+    else:
+        post_time_value = _normalize_text(post_time)
+    return f"{_normalize_text(page_id)}|{_normalize_text(page_name)}|{post_time_value}"
+
+
 def _safe_percentage(part, total):
     if not total:
         return 0.0
@@ -208,14 +217,33 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
         row["_post_time_dt"] = post_time
         row["_comment_time_dt"] = comment_time
         row["_comment_length"] = len(filtered_comment.split()) if filtered_comment else 0
+        row["_post_key"] = _build_post_key(row.get("PageID"), row.get("PageName"), post_time)
 
-        posts[post_time].append(row)
+        posts[row["_post_key"]].append(row)
         sentiment_counts[sentiment] += 1
         language_counts[language] += 1
         if processed_time:
             processed_times.append(processed_time)
 
-    ordered_posts = sorted(posts.items(), key=lambda item: (item[0] is None, item[0]))
+    post_anchor_sentiments = db_connection.fetch_post_anchor_sentiments([
+        {
+            "page_id": row_group[0].get("PageID") if row_group else None,
+            "page_name": row_group[0].get("PageName") if row_group else None,
+            "post_time": row_group[0].get("PostTime") if row_group else None,
+        }
+        for row_group in posts.values()
+        if row_group
+    ])
+
+    ordered_posts = sorted(
+        posts.items(),
+        key=lambda item: (
+            item[1][0]["_post_time_dt"] is None,
+            item[1][0]["_post_time_dt"],
+            _normalize_text(item[1][0].get("PageID")),
+            _normalize_text(item[1][0].get("PageName")),
+        ),
+    )
 
     language_sentiments = defaultdict(Counter)
     comment_lengths_by_sentiment = defaultdict(list)
@@ -225,7 +253,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
     solidarity_breakdown = []
     sample_comments = []
 
-    for index, (post_time, post_rows) in enumerate(ordered_posts, start=1):
+    for index, (_post_key, post_rows) in enumerate(ordered_posts, start=1):
         sorted_rows = sorted(
             post_rows,
             key=lambda row: (
@@ -234,6 +262,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
                 row.get("CommentHash"),
             ),
         )
+        post_time = sorted_rows[0]["_post_time_dt"] if sorted_rows else None
 
         post_sentiments = Counter()
         post_languages = Counter()
@@ -268,7 +297,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
         })
 
         if sorted_rows:
-            anchor_sentiment = _normalize_text(sorted_rows[0].get("Sentiment")).lower() or "unknown"
+            anchor_sentiment = post_anchor_sentiments.get(sorted_rows[0]["_post_key"], "unknown")
             comparable_rows = sorted_rows[1:] if len(sorted_rows) > 1 else []
             matches_by_language = defaultdict(lambda: {"matches": 0, "total": 0})
             for row in comparable_rows:
