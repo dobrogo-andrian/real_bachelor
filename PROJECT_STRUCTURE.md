@@ -1,74 +1,273 @@
-# Project Structure and Purpose
+# Project Structure
 
-This repository is a Flask-based web application with a static HTML frontend and a set of Python scripts for social media comment collection and analysis. The Flask app handles authentication (JWT cookies), serves HTML templates, and exposes API endpoints. The `static/backend` scripts implement a data pipeline: scrape Instagram comments, clean/language-detect, run sentiment analysis, aggregate into a dataset, and visualize results.
+This document reflects the current repository layout and the responsibilities of each major part of the project.
 
-## High-Level Architecture
-- **Web app (Flask)**: `app.py` is the entrypoint; serves templates and JSON endpoints, manages JWT auth via cookies.
-- **Frontend (HTML/CSS/JS)**: `templates/` for pages and `static/assets/` for styles, images, JS (based on HTML5UP "Forty").
-- **Data pipeline scripts**: `static/backend/*.py` for scraping, enrichment, loading, and analysis assembly.
-- **Database access**: `static/backend/db_connection.py` connects to a local SQL Server database for users.
+## High-level architecture
 
-## Key Entry Points
-- **`app.py`**: Flask app. Routes for login/signup/logout, JWT cookie refresh, static proxy, and data-processing endpoint.
-- **`static/backend/extract_data.py`**: Selenium-based scraper for Instagram comments; writes CSVs.
-- **`static/backend/load_to_db.py`**: Placeholder structure for loading extracted CSVs into the database.
-- **`static/backend/enrich_comments.py`**: Reads comment rows from SQL Server, normalizes text, detects language, scores sentiment, and upserts enriched rows.
-- **`static/backend/explorer_analysis.py`**: Builds page-level aggregates and chart-ready analysis structures from enriched comments.
+- `app.py` is the Flask entrypoint and the orchestration layer.
+- `templates/` contains the rendered HTML pages.
+- `static/assets/` contains the base frontend theme and styling assets.
+- `static/backend/` contains the Python data pipeline plus some page-specific JavaScript.
+- `ddl/` contains SQL Server schema files.
+- `unprocessed_data/` and `cookie/` store generated runtime artifacts.
 
-## Repository Layout
-- `app.py`
-  - Flask app and API routes.
-- `templates/`
-  - `index.html`, `landing.html`, `elements.html`, `generic.html`, `login.html`, `signup.html`, `test.html`
-- `static/`
-  - `assets/`
-    - `css/`, `js/`, `images/`, `sass/`, `webfonts/` (HTML5UP "Forty" theme assets)
-  - `backend/`
-    - `extract_data.py` (scrape comments with Selenium)
-    - `load_to_db.py` (DB load placeholders)
-    - `enrich_comments.py` (language detection + sentiment enrichment)
-    - `explorer_analysis.py` (analysis assembly for explorer views)
-    - `db_connection.py` (SQL Server user DB)
-    - `auth/` (legacy JS auth logic)
-    - `cookie/` (cookie pickle used by scraper)
-    - `unprocessed_data/` (raw CSV output, example `comments1/`)
+## Top-level tree
 
-## Web App Behavior
-- **Auth**
-  - JWT cookies stored by Flask-JWT-Extended.
-  - CSRF protection is disabled.
-  - `JWT_SECRET_KEY` is hardcoded in `app.py`.
-  - `/login` returns JSON on POST and sets access/refresh cookies.
-  - `/refresh` issues new access token from refresh cookie.
-  - Protected routes use `@jwt_required()`.
-  - Invalid/expired/absent tokens redirect to login for HTML requests and return JSON for API requests.
-- **Routes**
-  - `/`, `/test`, `/login`, `/signup` serve templates.
-  - `/elements`, `/generic`, `/landing`, `/static/<path>` are JWT-protected.
-  - `/process-data` triggers the scraper and returns basic JSON.
+```text
+real_bachelor/
+|-- app.py
+|-- README.md
+|-- PROJECT_STRUCTURE.md
+|-- TODO.md
+|-- LICENSE.txt
+|-- requirements.txt
+|-- cookie/
+|   `-- cookies.pkl
+|-- ddl/
+|   |-- Comments.sql
+|   |-- EnrichedComments.sql
+|   `-- Users.sql
+|-- static/
+|   |-- assets/
+|   |   |-- css/
+|   |   |-- images/
+|   |   |-- js/
+|   |   |-- sass/
+|   |   `-- webfonts/
+|   `-- backend/
+|       |-- common_utils.py
+|       |-- db_connection.py
+|       |-- enrich_comments.py
+|       |-- explorer_analysis.py
+|       |-- extract_data.py
+|       |-- load_to_db.py
+|       |-- auth/
+|       |   |-- auth.js
+|       |   |-- faq.js
+|       |   |-- home.js
+|       |   |-- login.js
+|       |   `-- signup.js
+|       |-- old_apprach/
+|       `-- __pycache__/
+|-- templates/
+|   |-- advanced_analysis.html
+|   |-- elements.html
+|   |-- explorer.html
+|   |-- extractor.html
+|   |-- faq.html
+|   |-- index.html
+|   |-- login.html
+|   |-- signup.html
+|   `-- test.html
+|-- unprocessed_data/
+|   `-- comments1/
+|       `-- lpnu_official_1.csv
+`-- __pycache__/
+```
 
-## Data Pipeline (Expected Flow)
-1. **Scrape**: `extract_data.py` uses Selenium to log in, find posts, and save comments to `static/backend/unprocessed_data/comments1/*.csv`.
-2. **Enrich**: `enrich_comments.py` reads rows from `[dbo].[Comments]`, normalizes text, detects language, scores sentiment, and writes to `[dbo].[EnrichedComments]`.
-3. **Analyze**: `explorer_analysis.py` builds language, sentiment, solidarity, and trend views from the enriched table.
-4. **Load to DB (optional)**: `load_to_db.py` provides placeholders for inserting extracted CSVs into the database.
+## Core backend files
 
-## Notable Implementation Details and Risks
-- **Side effects on import**: `static/backend/extract_data.py` ends with a call to `extract_data(...)` using hardcoded Instagram credentials. Importing this module will run the scraper immediately.
-- **Hardcoded secrets/paths**:
-  - `JWT_SECRET_KEY` is a placeholder in `app.py`.
-  - Selenium ChromeDriver path is hardcoded to `C:\chromedriver\chromedriver-win64\chromedriver.exe`.
-  - `extract_data.py` embeds a username/password at the bottom.
-- **Database**: `db_connection.py` expects a local SQL Server instance and `Users` table. `insert_data_to_database` currently duplicates user-insert logic and references undefined variables (`username`, `email`, `password`).
-- **Encoding**: Several comments/log strings in pipeline scripts contain mojibake, likely from non-UTF-8 encoding in source files.
-- **Frontend auth JS**: `static/backend/auth/*.js` appears unused by Flask routes, likely legacy.
+### `app.py`
 
-## How to Extend Safely
-- Add a `README.md` or update `README.txt` with setup steps and environment variables.
-- Move secrets and credentials to environment variables.
-- Remove the `extract_data(...)` call at module import and guard it with `if __name__ == "__main__":`.
-- Define and document expected data directories (`language_marked_comments`, `sentiment_analysis`, `final_dataset`) if they should be checked in or generated.
+Responsibilities:
 
-## Dependencies (Inferred from Code)
-- Python packages: `flask`, `flask-cors`, `flask-jwt-extended`, `pyodbc`, `selenium`, `fake-useragent`, `pandas`, `langdetect`, `transformers`, `seaborn`, `matplotlib`, `statsmodels`.
-- External: ChromeDriver, SQL Server (ODBC Driver 17), Hugging Face model downloads at runtime.
+- configures Flask, CORS, and JWT cookie authentication
+- serves public and protected HTML pages
+- exposes API endpoints for extraction, enrichment, and analysis
+- coordinates `extract_data`, `load_to_db`, `enrich_comments`, and explorer analysis helpers
+
+Main route groups:
+
+- public pages: `/`, `/login`, `/signup`, `/test`
+- authenticated pages: `/extractor`, `/explorer`, `/advanced-analysis`, `/faq`, `/elements`
+- data APIs:
+  - `/process-data`
+  - `/enrich-comments`
+  - `/page-analysis`
+  - `/api/advanced-analysis/preview`
+  - `/api/advanced-analysis/analyze`
+
+### `static/backend/extract_data.py`
+
+Responsibilities:
+
+- launches Selenium with a configured ChromeDriver
+- logs into Instagram
+- loads posts from a target page
+- opens comment sections, scrolls, and extracts comment text plus likes
+- writes CSV files for downstream loading
+
+Important details:
+
+- runtime output is written under `unprocessed_data/`
+- cookie persistence is stored in `cookie/cookies.pkl`
+- a manual `__main__` block still contains hardcoded Instagram credentials
+
+### `static/backend/load_to_db.py`
+
+Responsibilities:
+
+- walks `unprocessed_data/` recursively for CSV files
+- validates required input columns
+- derives stable comment hashes
+- prepares comment rows for SQL Server
+- merges data into `[dbo].[Comments]`
+
+Important details:
+
+- default input folder is the repository-level `unprocessed_data/`
+- `dry_run=True` is supported for non-writing checks
+
+### `static/backend/enrich_comments.py`
+
+Responsibilities:
+
+- fetches raw rows from `Comments`
+- normalizes text and datetimes
+- detects dominant language
+- filters text for language-specific processing
+- loads transformer models
+- assigns sentiment labels
+- clears or refreshes scoped enrichment targets
+- upserts rows into `EnrichedComments`
+
+Supported enrichment scope:
+
+- whole database
+- selected page name
+- selected page id
+
+### `static/backend/explorer_analysis.py`
+
+Responsibilities:
+
+- converts enriched comment rows into chart-ready summaries
+- builds language, sentiment, length, timing, and post-level breakdowns
+- powers both explorer and advanced-analysis responses
+
+Primary entry points:
+
+- `build_page_analysis(selection_type, selection_value)`
+- `build_analysis_from_rows(rows, ...)`
+
+### `static/backend/db_connection.py`
+
+Responsibilities:
+
+- connects to SQL Server through `pyodbc`
+- encrypts and decrypts Instagram credentials with Windows DPAPI
+- inserts users
+- fetches login and Instagram credential data
+- builds distinct filter dimensions for explorer pages
+- assembles filtered preview and analysis query results from `EnrichedComments`
+
+Important details:
+
+- assumes SQL Server is available on `localhost`
+- currently uses hardcoded DB credentials in source
+
+### `static/backend/common_utils.py`
+
+Responsibilities:
+
+- shared helper utilities used across the backend modules
+
+## Frontend files
+
+### `templates/`
+
+- `index.html`: public landing page
+- `login.html`: authentication page
+- `signup.html`: user creation page
+- `extractor.html`: extraction workflow page
+- `explorer.html`: page-level exploration UI
+- `advanced_analysis.html`: filter-heavy analysis workspace
+- `faq.html`: in-app product and technical reference page
+- `elements.html`: theme reference page retained from the base template
+- `test.html`: development/testing page
+
+### `static/backend/auth/`
+
+These scripts support page-level frontend behavior such as:
+
+- login handling
+- signup submission
+- landing page auth-aware behavior
+- FAQ page behavior
+
+The folder name is historical; it now contains more than authentication-only logic.
+
+### `static/assets/`
+
+Theme and UI assets derived from HTML5UP "Forty":
+
+- `css/`: compiled stylesheets plus project-specific overrides
+- `js/`: theme JavaScript
+- `images/`: theme images
+- `sass/`: source styles
+- `webfonts/`: bundled icon fonts
+
+## Database schema files
+
+### `ddl/Users.sql`
+
+Defines the `Users` table with:
+
+- `UserID`
+- `Username`
+- `PasswordHash`
+- `Email`
+- `InstagramLoginEncrypted`
+- `InstagramPasswordEncrypted`
+
+### `ddl/Comments.sql`
+
+Defines the raw ingestion table with:
+
+- `CommentHash` primary key
+- page metadata
+- post time
+- comment text
+- comment time
+- likes
+- load/update timestamps
+- source tracking
+
+### `ddl/EnrichedComments.sql`
+
+Defines the processed analysis table with:
+
+- the original comment identity fields
+- `MainLanguage`
+- `FilteredComment`
+- `Sentiment`
+- processing timestamps
+- source tracking
+
+It also includes:
+
+- a foreign key back to `Comments`
+- language and sentiment check constraints
+- nonclustered indexes for common filter fields
+
+## Generated and runtime data
+
+### `unprocessed_data/`
+
+- stores raw CSV files produced by the scraper
+- current sample content: `comments1/lpnu_official_1.csv`
+
+### `cookie/`
+
+- stores Selenium cookie state in `cookies.pkl`
+
+### `__pycache__/`
+
+- generated Python bytecode caches
+- should be treated as runtime artifacts, not source
+
+## Current project state notes
+
+- `static/backend/old_apprach/` exists but is currently empty.
+- The repository worktree includes generated files such as `__pycache__/` and extraction output.
+- Authentication and database configuration are functional for local development but still rely on hardcoded secrets/settings in source files.

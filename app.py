@@ -365,7 +365,7 @@ def faq():
             {
                 "title": "1. Source Selection",
                 "module": "Comments table",
-                "description": "Select a page, period, source, and post window from the central table before any derived analysis runs.",
+                "description": "choose a page, period, source, and post window from the central table before any derived analysis runs.",
             },
             {
                 "title": "2. Language Processing",
