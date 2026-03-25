@@ -9,10 +9,12 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from static.backend.common_utils import get_next_filename
+from static.backend.db_connection import fetch_user_instagram_credentials
 
 
 def delete_previos_files():
@@ -78,32 +80,119 @@ def login_to_instagram(driver, username, password):
     """
        Instagram.
     """
+    username_selectors = [
+        (By.NAME, "username"),
+        (By.NAME, "email"),
+        (By.CSS_SELECTOR, "form input[autocomplete*='username']"),
+        (By.CSS_SELECTOR, "form input[type='text']"),
+    ]
+    password_selectors = [
+        (By.NAME, "password"),
+        (By.NAME, "pass"),
+        (By.CSS_SELECTOR, "form input[type='password']"),
+    ]
+    submit_selectors = [
+        (By.CSS_SELECTOR, "form#login_form button[type='submit']"),
+        (By.CSS_SELECTOR, "form#login_form input[type='submit']"),
+        (By.XPATH, "//form[@id='login_form']//div[@role='button' and (@aria-label='Log In' or .//span[normalize-space()='Log in'])]"),
+        (By.XPATH, "//button[@type='submit']"),
+        (By.XPATH, "//div[@role='button' and (@aria-label='Log In' or .//span[normalize-space()='Log in'])]"),
+        (By.XPATH, "//span[normalize-space()='Log in']/ancestor::*[@role='button' or self::button][1]"),
+    ]
+
+    def wait_for_visible(selectors, timeout=20):
+        def _find(current_driver):
+            for by, value in selectors:
+                elements = current_driver.find_elements(by, value)
+                for element in elements:
+                    if element.is_displayed():
+                        return element
+            return False
+
+        return WebDriverWait(driver, timeout).until(_find)
+
+    def find_first_displayed(selectors):
+        for by, value in selectors:
+            elements = driver.find_elements(by, value)
+            for element in elements:
+                if element.is_displayed():
+                    return element
+        return None
+
+    def wait_for_login_transition(timeout=10):
+        WebDriverWait(driver, timeout).until(
+            lambda current_driver: "accounts/login" not in current_driver.current_url
+            or current_driver.find_elements(By.NAME, "verificationCode")
+            or current_driver.find_elements(By.CSS_SELECTOR, "input[name='verificationCode']")
+        )
+
     try:
         driver.get("https://www.instagram.com/accounts/login/")
         time.sleep(random.uniform(3, 5))
         i = 0
         while "login" in str.lower(f"{driver.current_url}") and i <= 3:
             i += 1
-            username_field = driver.find_element(By.NAME, "username")
-            password_field = driver.find_element(By.NAME, "password")
+            print(f"[INFO] Login attempt {i}. Current URL: {driver.current_url}")
+            username_field = wait_for_visible(username_selectors, timeout=20)
+            password_field = wait_for_visible(password_selectors, timeout=20)
 
+            username_field.clear()
+            password_field.clear()
             username_field.send_keys(username)
             password_field.send_keys(password)
             print("login and pass should appear, look for log in button")
-            time.sleep(random.uniform(3, 5))
-            time.sleep(10)
-            login_button = driver.find_element(By.XPATH, "//span[contains(text(), 'Log in')]")
-            print("must have located log in button")
-            time.sleep(random.uniform(3, 5))
-            login_button.click()
+            password_field.send_keys(Keys.ENTER)
 
-            time.sleep(random.uniform(5, 7))
+            try:
+                wait_for_login_transition(timeout=10)
+                continue
+            except TimeoutException:
+                print("[INFO] Enter submit did not leave the login page. Trying button click.")
+
+            time.sleep(random.uniform(2, 4))
+            login_button = find_first_displayed(submit_selectors)
+            if login_button is None:
+                raise TimeoutException("Could not locate a visible login submit control.")
+
+            print("must have located log in button")
+            form = None
+            try:
+                form = login_button.find_element(By.XPATH, "ancestor::form[1]")
+            except Exception:
+                form = None
+
+            if form is not None:
+                try:
+                    driver.execute_script("arguments[0].requestSubmit();", form)
+                except Exception:
+                    try:
+                        driver.execute_script("arguments[0].submit();", form)
+                    except Exception:
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", login_button)
+                        try:
+                            login_button.click()
+                        except Exception:
+                            driver.execute_script("arguments[0].click();", login_button)
+            else:
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", login_button)
+                try:
+                    login_button.click()
+                except Exception:
+                    driver.execute_script("arguments[0].click();", login_button)
+
+            wait_for_login_transition(timeout=10)
         if "accounts/login" in driver.current_url:
             print("[WARN] Login failed or still on login page.")
+            return False
         else:
             print("[INFO] Login successful.")
+            return True
     except Exception as e:
-        print(f"[ERROR] Instagram login error: {e}")
+        print(
+            f"[ERROR] Instagram login error ({type(e).__name__}): {e!r}. "
+            f"URL={driver.current_url}, title={driver.title!r}"
+        )
+        return False
 
 
 def save_cookies(driver, filename="cookie/cookies.pkl"):
@@ -376,8 +465,14 @@ def click_view_all_comments(driver):
         "View all comments".
     """
     try:
+        view_all_comments_xpath = (
+            "//a[.//span["
+            "contains(normalize-space(), 'View all') "
+            "or starts-with(normalize-space(), 'View ')"
+            "]]"
+        )
         view_all_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//a[.//span[contains(text(), 'View all')]]"))
+            EC.element_to_be_clickable((By.XPATH, view_all_comments_xpath))
         )
         view_all_button.click()
         print("[INFO] Clicked 'View all comments'.")
@@ -463,6 +558,7 @@ def save_comments(driver, POST_URL, target_page, page_name):
     print(comments_data)
     print(f"[INFO] Collected {len(comments_data)} comments. Saving CSV...")
     df = pd.DataFrame(comments_data, columns=["Comment", "Time", "Likes"])
+    df.insert(0, "PostHref", POST_URL)
     df.insert(0, "PageID", target_page)
     df.insert(0, "PageName", page_name)
     print(f"df: {df}")
@@ -513,12 +609,16 @@ def find_scroll_element_by_scroll_properties(driver, element_owner):
 
 def collect_all_hrefs(container_element, target_page, number_of_posts):
     hrefs = []
+    seen_hrefs = set()
     try:
         anchor_elements = container_element.find_elements(By.TAG_NAME, "a")
         for anchor in anchor_elements:
             href = anchor.get_attribute("href")
             if href:
-                hrefs.append(href.replace(f"/{target_page}", ""))
+                normalized_href = href.replace(f"/{target_page}", "")
+                if normalized_href not in seen_hrefs:
+                    seen_hrefs.add(normalized_href)
+                    hrefs.append(normalized_href)
         print(f"[INFO] Collected {len(hrefs)} post links.")
         return hrefs[0:number_of_posts]
     except Exception as e:
@@ -552,8 +652,18 @@ def load_all_posts(driver, target_page, number_of_posts):
     time.sleep(random.uniform(2, 4))
     scroll_container = find_scroll_element_by_scroll_properties(driver, "html")
     time.sleep(random.uniform(2, 4))
+    hrefs = []
     while True:
         try:
+            container_element = driver.find_element(
+                By.XPATH,
+                "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') and contains(., 'position: relative')]]"
+            )
+            hrefs = collect_all_hrefs(container_element, target_page, number_of_posts)
+            if len(hrefs) >= number_of_posts:
+                print(f"[INFO] Reached requested number of posts: {number_of_posts}.")
+                break
+
             if not try_scroll_page(driver, scroll_container, limit_scrolling=True):
                 print("[INFO] All posts loaded.")
                 break
@@ -561,9 +671,6 @@ def load_all_posts(driver, target_page, number_of_posts):
         except Exception as e:
             print(f"[ERROR] Post loading error: {e}")
             break
-    container_element = driver.find_element(By.XPATH,
-                                            "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') and contains(., 'position: relative')]]")
-    hrefs = collect_all_hrefs(container_element, target_page, number_of_posts)
     return hrefs, page_name
 
 
@@ -604,9 +711,9 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
                 collected_comment_rows += result["comments_collected"]
                 saved_files.append(result["output_path"])
         else:
-            login_to_instagram(driver, USERNAME, PASSWORD)
-            save_cookies(driver)
-            if "/accounts/login/" not in driver.current_url:
+            login_success = login_to_instagram(driver, USERNAME, PASSWORD)
+            if login_success:
+                save_cookies(driver)
                 posts, page_name = load_all_posts(driver, target_page, number_of_posts)
                 for i in posts:
                     result = save_comments(driver, i, target_page, page_name)
@@ -636,8 +743,23 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
 
 
 if __name__ == "__main__":
-    extract_data("dobrogo_scientist", "andrian1233", "hnatiuk_ivan", 2)
-    # insert_data_to_database()
+    app_username = os.getenv("APP_USERNAME")
+    target_page = os.getenv("TARGET_PAGE")
+    number_of_posts = os.getenv("NUMBER_OF_POSTS", "2")
+
+    if not app_username or not target_page:
+        raise ValueError("Set APP_USERNAME and TARGET_PAGE environment variables before running extract_data.py directly.")
+
+    instagram_credentials = fetch_user_instagram_credentials(app_username)
+    if not instagram_credentials:
+        raise ValueError(f"No stored Instagram credentials found for user '{app_username}'.")
+
+    instagram_username = instagram_credentials.get("instagram_login")
+    instagram_password = instagram_credentials.get("instagram_password")
+    if not instagram_username or not instagram_password:
+        raise ValueError(f"Stored Instagram credentials are incomplete for user '{app_username}'.")
+
+    extract_data(instagram_username, instagram_password, target_page, int(number_of_posts))
 
 
 

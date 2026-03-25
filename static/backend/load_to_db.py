@@ -63,12 +63,12 @@ def prepare_rows(df, page_id, post_time, load_time):
             "CommentHash": compute_comment_hash(row_page_id, post_time, comment_time_value, comment_value),
             "PageName": page_name,
             "PageID": row_page_id,
+            "PostHref": getattr(row, "PostHref", None),
             "PostTime": post_time,
             "Comment": comment_value,
             "CommentTime": comment_time_value,
             "CommentLikes": int(row.Likes) if str(row.Likes).strip() else 0,
             "LoadTime": load_time,
-            "Source": "Web interface",
         })
     return rows
 
@@ -83,12 +83,12 @@ def insert_rows(conn, rows):
         (pyodbc.SQL_WVARCHAR, 64, 0),
         (pyodbc.SQL_WVARCHAR, 100, 0),
         (pyodbc.SQL_WVARCHAR, 100, 0),
+        (pyodbc.SQL_WVARCHAR, 0, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
         (pyodbc.SQL_WVARCHAR, 0, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
         (pyodbc.SQL_INTEGER, 0, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
-        (pyodbc.SQL_WVARCHAR, 50, 0),
     ])
     cursor.executemany(
         """
@@ -98,41 +98,38 @@ def insert_rows(conn, rows):
                 ? AS [CommentHash],
                 ? AS [PageName],
                 ? AS [PageID],
+                ? AS [PostHref],
                 ? AS [PostTime],
                 ? AS [Comment],
                 ? AS [CommentTime],
                 ? AS [CommentLikes],
-                ? AS [LoadTime],
-                ? AS [Source]
+                ? AS [LoadTime]
         ) AS source
         ON target.[CommentHash] = source.[CommentHash]
         WHEN MATCHED AND (
             ISNULL(target.[PageName], N'') <> ISNULL(source.[PageName], N'')
             OR ISNULL(target.[PageID], N'') <> ISNULL(source.[PageID], N'')
+            OR ISNULL(target.[PostHref], N'') <> ISNULL(source.[PostHref], N'')
             OR ISNULL(target.[PostTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[PostTime], CONVERT(datetime2(0), '1900-01-01'))
             OR ISNULL(target.[Comment], N'') <> ISNULL(source.[Comment], N'')
             OR ISNULL(target.[CommentTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[CommentTime], CONVERT(datetime2(0), '1900-01-01'))
             OR ISNULL(target.[CommentLikes], -1) <> ISNULL(source.[CommentLikes], -1)
-            OR ISNULL(target.[Source], N'') <> ISNULL(source.[Source], N'')
         ) THEN
             UPDATE SET
                 [PageName] = source.[PageName],
                 [PageID] = source.[PageID],
+                [PostHref] = source.[PostHref],
                 [PostTime] = source.[PostTime],
                 [Comment] = source.[Comment],
                 [CommentTime] = source.[CommentTime],
                 [CommentLikes] = source.[CommentLikes],
-                [LoadTime] = source.[LoadTime],
-                [UpdateTime] = source.[LoadTime],
-                [Source] = source.[Source]
+                [LoadTime] = source.[LoadTime]
         WHEN NOT MATCHED THEN
             INSERT (
-                [CommentHash], [PageName], [PageID], [PostTime],
-                [Comment], [CommentTime], [CommentLikes], [LoadTime], [Source]
+                [CommentHash], [PageName], [PageID], [PostHref], [PostTime], [Comment], [CommentTime], [CommentLikes], [LoadTime]
             )
             VALUES (
-                source.[CommentHash], source.[PageName], source.[PageID], source.[PostTime],
-                source.[Comment], source.[CommentTime], source.[CommentLikes], source.[LoadTime], source.[Source]
+                source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime], source.[Comment], source.[CommentTime], source.[CommentLikes], source.[LoadTime]
             );
         """,
         [
@@ -140,12 +137,12 @@ def insert_rows(conn, rows):
                 r["CommentHash"],
                 r["PageName"],
                 r["PageID"],
+                r["PostHref"],
                 r["PostTime"],
                 r["Comment"],
                 r["CommentTime"],
                 r["CommentLikes"],
                 r["LoadTime"],
-                r["Source"],
             )
             for r in rows
         ],

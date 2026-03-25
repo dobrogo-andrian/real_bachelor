@@ -2,6 +2,7 @@ CREATE TABLE [dbo].[EnrichedComments](
     [CommentHash] [char](64) NOT NULL,
     [PageName] [nvarchar](100) NOT NULL,
     [PageID] [nvarchar](100) NOT NULL,
+    [PostHref] [nvarchar](max) NULL,
     [PostTime] [datetime2](0) NULL,
     [Comment] [nvarchar](max) NOT NULL,
     [CommentTime] [datetime2](0) NULL,
@@ -10,7 +11,6 @@ CREATE TABLE [dbo].[EnrichedComments](
     [FilteredComment] [nvarchar](max) NULL,
     [Sentiment] [nvarchar](20) NOT NULL,
     [ProcessedTime] [datetime2](0) NOT NULL CONSTRAINT [DF_EnrichedComments_ProcessedTime] DEFAULT (SYSUTCDATETIME()),
-    [UpdateTime] [datetime2](0) NULL,
     [Source] [nvarchar](50) NULL,
 PRIMARY KEY CLUSTERED
 (

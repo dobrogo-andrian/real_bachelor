@@ -92,6 +92,7 @@ def build_comment_query(mode, page_name=None, page_id=None):
             c.[CommentHash],
             c.[PageName],
             c.[PageID],
+            c.[PostHref],
             c.[PostTime],
             c.[Comment],
             c.[CommentTime],
@@ -222,6 +223,7 @@ def prepare_enriched_rows(comment_rows, models, source):
             "CommentHash": row["CommentHash"],
             "PageName": row["PageName"],
             "PageID": row["PageID"],
+            "PostHref": row.get("PostHref"),
             "PostTime": normalize_datetime_value(row["PostTime"]),
             "Comment": row["Comment"],
             "CommentTime": normalize_datetime_value(row["CommentTime"]),
@@ -247,6 +249,7 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
         (pyodbc.SQL_WVARCHAR, 64, 0),
         (pyodbc.SQL_WVARCHAR, 100, 0),
         (pyodbc.SQL_WVARCHAR, 100, 0),
+        (pyodbc.SQL_WVARCHAR, 0, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
         (pyodbc.SQL_WVARCHAR, 0, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
@@ -264,6 +267,7 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
                 ? AS [CommentHash],
                 ? AS [PageName],
                 ? AS [PageID],
+                ? AS [PostHref],
                 ? AS [PostTime],
                 ? AS [Comment],
                 ? AS [CommentTime],
@@ -278,6 +282,7 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
         WHEN MATCHED AND (
             ISNULL(target.[PageName], N'') <> ISNULL(source.[PageName], N'')
             OR ISNULL(target.[PageID], N'') <> ISNULL(source.[PageID], N'')
+            OR ISNULL(target.[PostHref], N'') <> ISNULL(source.[PostHref], N'')
             OR ISNULL(target.[PostTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[PostTime], CONVERT(datetime2(0), '1900-01-01'))
             OR ISNULL(target.[Comment], N'') <> ISNULL(source.[Comment], N'')
             OR ISNULL(target.[CommentTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[CommentTime], CONVERT(datetime2(0), '1900-01-01'))
@@ -290,6 +295,7 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
             UPDATE SET
                 [PageName] = source.[PageName],
                 [PageID] = source.[PageID],
+                [PostHref] = source.[PostHref],
                 [PostTime] = source.[PostTime],
                 [Comment] = source.[Comment],
                 [CommentTime] = source.[CommentTime],
@@ -298,28 +304,27 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
                 [FilteredComment] = source.[FilteredComment],
                 [Sentiment] = source.[Sentiment],
                 [ProcessedTime] = source.[ProcessedTime],
-                [UpdateTime] = source.[ProcessedTime],
                 [Source] = source.[Source]
         WHEN NOT MATCHED THEN
             INSERT (
-                [CommentHash], [PageName], [PageID], [PostTime], [Comment],
+                [CommentHash], [PageName], [PageID], [PostHref], [PostTime], [Comment],
                 [CommentTime], [CommentLikes], [MainLanguage], [FilteredComment],
                 [Sentiment], [ProcessedTime], [Source]
             )
             VALUES (
-                source.[CommentHash], source.[PageName], source.[PageID], source.[PostTime], source.[Comment],
+                source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime], source.[Comment],
                 source.[CommentTime], source.[CommentLikes], source.[MainLanguage], source.[FilteredComment],
                 source.[Sentiment], source.[ProcessedTime], source.[Source]
             );
     """
     insert_if_missing_sql = """
         INSERT INTO [dbo].[EnrichedComments] (
-            [CommentHash], [PageName], [PageID], [PostTime], [Comment],
+            [CommentHash], [PageName], [PageID], [PostHref], [PostTime], [Comment],
             [CommentTime], [CommentLikes], [MainLanguage], [FilteredComment],
             [Sentiment], [ProcessedTime], [Source]
         )
         SELECT
-            source.[CommentHash], source.[PageName], source.[PageID], source.[PostTime], source.[Comment],
+            source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime], source.[Comment],
             source.[CommentTime], source.[CommentLikes], source.[MainLanguage], source.[FilteredComment],
             source.[Sentiment], source.[ProcessedTime], source.[Source]
         FROM (
@@ -327,6 +332,7 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
                 ? AS [CommentHash],
                 ? AS [PageName],
                 ? AS [PageID],
+                ? AS [PostHref],
                 ? AS [PostTime],
                 ? AS [Comment],
                 ? AS [CommentTime],
@@ -356,6 +362,7 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
                 row["CommentHash"],
                 row["PageName"],
                 row["PageID"],
+                row["PostHref"],
                 row["PostTime"],
                 row["Comment"],
                 row["CommentTime"],

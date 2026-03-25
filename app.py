@@ -495,21 +495,20 @@ def process_data_endpoint():
         if not instagram_username or not instagram_password:
             return jsonify({'error': 'Instagram credentials are missing for the logged in user.'}), 400
 
-        # Step 1: Load data
         extraction_result = extract_data(instagram_username, instagram_password, target_page, number_of_posts)
+        if extraction_result.get('posts_loaded', 0) == 0 or not extraction_result.get('saved_files'):
+            return jsonify(
+                {
+                    'error': 'Extraction did not produce any files.',
+                    'result': extraction_result,
+                }
+            ), 502
+
         logger.debug("Starting load_to_db after extract_data")
         load_result = load_to_db(dry_run=False)
         logger.debug("load_to_db finished")
 
-        # # Step 2: Analyze data
-        # analyzed_data = analyze_data(data)
 
-        # # Step 3: Aggregate data
-        # aggregated_data = aggregate_data(analyzed_data)
-        # # Step 4: Process data
-        # final_result = process_data(aggregated_data)
-
-        # Return the final result to the frontend
         return jsonify(
             {
                 'success': True,
