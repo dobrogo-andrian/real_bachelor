@@ -307,6 +307,30 @@ def fetch_distinct_comment_dimensions():
         conn.close()
 
 
+def fetch_existing_post_hrefs(page_id):
+    normalized_page_id = str(page_id).strip() if page_id is not None else ""
+    if not normalized_page_id:
+        return set()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT DISTINCT [PostHref]
+            FROM [dbo].[Comments]
+            WHERE [PageID] = ?
+              AND [PostHref] IS NOT NULL
+              AND LTRIM(RTRIM([PostHref])) <> ''
+            """,
+            (normalized_page_id,),
+        )
+        return {str(row[0]).strip() for row in cursor.fetchall() if row[0] and str(row[0]).strip()}
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def fetch_advanced_comment_dimensions():
     conn = get_db_connection()
     cursor = conn.cursor()

@@ -36,17 +36,17 @@ def normalize_hash_value(value):
     return str(value).strip()
 
 
-def compute_comment_hash(page_id, post_time, comment_time, comment):
+def compute_comment_hash(page_id, post_href, comment_time, comment):
     base = "|".join([
         normalize_hash_value(page_id),
-        normalize_hash_value(post_time),
+        normalize_hash_value(post_href),
         normalize_hash_value(comment_time),
         normalize_hash_value(comment),
     ])
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
-def prepare_rows(df, page_id, post_time, load_time):
+def prepare_rows(df, page_id, post_href, post_time, load_time):
     validate_columns(df)
     rows = []
     for row in df.itertuples(index=False):
@@ -60,10 +60,10 @@ def prepare_rows(df, page_id, post_time, load_time):
         if row_page_id is None or str(row_page_id).strip() == "":
             row_page_id = page_id
         rows.append({
-            "CommentHash": compute_comment_hash(row_page_id, post_time, comment_time_value, comment_value),
+            "CommentHash": compute_comment_hash(row_page_id, post_href, comment_time_value, comment_value),
             "PageName": page_name,
             "PageID": row_page_id,
-            "PostHref": getattr(row, "PostHref", None),
+            "PostHref": post_href,
             "PostTime": post_time,
             "Comment": comment_value,
             "CommentTime": comment_time_value,
@@ -192,11 +192,13 @@ def load_to_db(input_folder="unprocessed_data", dry_run=True):
             df = pd.read_csv(input_csv_path)
             validate_columns(df)
 
+            post_href_series = df["PostHref"] if "PostHref" in df.columns else pd.Series(dtype="object")
+            post_href = str(post_href_series.dropna().iloc[0]).strip() if not post_href_series.dropna().empty else None
             time_series = pd.to_datetime(df["Time"], errors="coerce")
             post_time = time_series.dropna().iloc[0].to_pydatetime() if not time_series.dropna().empty else None
             load_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
-            rows = prepare_rows(df, page_id, post_time, load_time)
+            rows = prepare_rows(df, page_id, post_href, post_time, load_time)
             processed_files += 1
 
             if dry_run:

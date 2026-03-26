@@ -12,9 +12,87 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
 from static.backend.common_utils import get_next_filename
 from static.backend.db_connection import fetch_user_instagram_credentials
+
+
+POST_CONTAINER_XPATH = (
+    "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') "
+    "and contains(., 'position: relative')]]"
+)
+
+
+def human_pause(min_seconds=0.2, max_seconds=0.6):
+    time.sleep(random.uniform(min_seconds, max_seconds))
+
+
+def wait_for_document_ready(driver, timeout=10):
+    WebDriverWait(driver, timeout).until(
+        lambda current_driver: current_driver.execute_script("return document.readyState") == "complete"
+    )
+
+
+def wait_for_any_element(driver, selectors, timeout=10):
+    def _find(current_driver):
+        for by, value in selectors:
+            try:
+                elements = current_driver.find_elements(by, value)
+                for element in elements:
+                    try:
+                        if element.is_displayed():
+                            return element
+                    except StaleElementReferenceException:
+                        continue
+            except StaleElementReferenceException:
+                continue
+        return False
+
+    return WebDriverWait(driver, timeout).until(_find)
+
+
+def wait_for_profile_content(driver, timeout=12):
+    wait_for_document_ready(driver, timeout=timeout)
+    selectors = [
+        (By.XPATH, "//header"),
+        (By.XPATH, POST_CONTAINER_XPATH),
+        (By.TAG_NAME, "article"),
+    ]
+    return wait_for_any_element(driver, selectors, timeout=timeout)
+
+
+def wait_for_post_content(driver, timeout=12):
+    wait_for_document_ready(driver, timeout=timeout)
+    selectors = [
+        (By.XPATH, "//article"),
+        (By.XPATH, "//main//time[@datetime]"),
+        (By.XPATH, "//div[@role='dialog']"),
+    ]
+    return wait_for_any_element(driver, selectors, timeout=timeout)
+
+
+def wait_for_comment_surface(driver, timeout=8):
+    selectors = [
+        (By.XPATH, "//div[@role='dialog']"),
+        (By.XPATH, "//time[@datetime]"),
+        (By.XPATH, "//div[@role='button' and @aria-label='Close']"),
+    ]
+    try:
+        return wait_for_any_element(driver, selectors, timeout=timeout)
+    except TimeoutException:
+        return None
+
+
+def retry_on_stale(action, description, retries=2, wait_range=(1.2, 2.4)):
+    for attempt in range(retries + 1):
+        try:
+            return action()
+        except StaleElementReferenceException as e:
+            if attempt == retries:
+                raise
+            print(f"[WARN] Stale element during {description}. Retrying ({attempt + 1}/{retries})...")
+            human_pause(*wait_range)
+    return None
 
 
 def delete_previos_files():
@@ -128,7 +206,8 @@ def login_to_instagram(driver, username, password):
 
     try:
         driver.get("https://www.instagram.com/accounts/login/")
-        time.sleep(random.uniform(3, 5))
+        wait_for_document_ready(driver, timeout=12)
+        human_pause(0.6, 1.2)
         i = 0
         while "login" in str.lower(f"{driver.current_url}") and i <= 3:
             i += 1
@@ -149,7 +228,7 @@ def login_to_instagram(driver, username, password):
             except TimeoutException:
                 print("[INFO] Enter submit did not leave the login page. Trying button click.")
 
-            time.sleep(random.uniform(2, 4))
+            human_pause(0.4, 0.9)
             login_button = find_first_displayed(submit_selectors)
             if login_button is None:
                 raise TimeoutException("Could not locate a visible login submit control.")
@@ -250,13 +329,21 @@ def load_cookies(driver, filename=r"cookie/cookies.pkl"):
 
 def scroll_and_load_comments(driver):
     print("[INFO] Loading comments...")
-    time.sleep(random.uniform(3, 5))
-    try_press_cancel_button(driver)
-    time.sleep(random.uniform(3, 5))
-    if click_view_all_comments(driver):
-        time.sleep(random.uniform(3, 5))
-        click_more_button(driver)
-        time.sleep(random.uniform(3, 5))
+    retry_on_stale(
+        lambda: wait_for_comment_surface(driver, timeout=8),
+        "waiting for comment surface",
+    )
+    human_pause(0.3, 0.8)
+    retry_on_stale(lambda: try_press_cancel_button(driver), "closing overlay")
+    human_pause(0.2, 0.6)
+    if retry_on_stale(lambda: click_view_all_comments(driver), "opening all comments"):
+        retry_on_stale(
+            lambda: wait_for_comment_surface(driver, timeout=8),
+            "waiting for expanded comments",
+        )
+        human_pause(0.25, 0.7)
+        retry_on_stale(lambda: click_more_button(driver), "clicking more comments")
+        human_pause(0.2, 0.6)
         scroll_container = find_scroll_element_by_scroll_properties(driver, "div")
         if not scroll_container:
             print("[WARN] No scrollable comment containers found.")
@@ -265,17 +352,21 @@ def scroll_and_load_comments(driver):
                 try:
                     if not try_scroll_page(driver, scroll_container):
                         break
-                    time.sleep(random.uniform(2, 4))
+                    human_pause(0.15, 0.4)
                 except Exception as e:
                     print(f"[ERROR] Error while loading comments: {e}")
                     break
         print("[INFO] All comments loaded.")
     else:
-        time.sleep(random.uniform(3, 5))
-        if click_reels_comment_button(driver):
-            time.sleep(random.uniform(3, 5))
-            click_more_button(driver)
-            time.sleep(random.uniform(3, 5))
+        human_pause(0.2, 0.6)
+        if retry_on_stale(lambda: click_reels_comment_button(driver), "opening reels comments"):
+            retry_on_stale(
+                lambda: wait_for_comment_surface(driver, timeout=8),
+                "waiting for reels comments",
+            )
+            human_pause(0.25, 0.7)
+            retry_on_stale(lambda: click_more_button(driver), "clicking more comments")
+            human_pause(0.2, 0.6)
         scroll_container = find_scroll_element_by_scroll_properties(driver, "div")
         print("[INFO] Fallback scrolling mode.")
         if not scroll_container:
@@ -285,27 +376,60 @@ def scroll_and_load_comments(driver):
                 try:
                     if not try_scroll_page(driver, scroll_container):
                         break
-                    time.sleep(random.uniform(2, 4))
+                    human_pause(0.15, 0.4)
                 except Exception as e:
                     print(f"[ERROR] Error while loading comments: {e}")
                     break
         print("[INFO] All comments loaded.")
 
 
-def try_scroll_page(driver, scroll_container, limit_scrolling=False):
-    time.sleep(random.uniform(3.5, 5.5))
+def get_scroll_wait_profile(driver, scroll_container):
+    container_height = driver.execute_script(
+        """
+        return Math.max(
+            arguments[0].clientHeight || 0,
+            arguments[0].offsetHeight || 0,
+            1
+        );
+        """,
+        scroll_container
+    )
+    load_timeout = min(3.2, max(1.2, container_height / 550))
+    poll_interval = min(0.45, max(0.2, container_height / 4000))
+    settle_delay = min(1.4, max(0.45, container_height / 1800))
+    return container_height, load_timeout, poll_interval, settle_delay
+
+
+def try_scroll_page(driver, scroll_container, limit_scrolling=False, stop_scroll_callback=None):
     try:
+        _, load_timeout, poll_interval, settle_delay = get_scroll_wait_profile(driver, scroll_container)
+        time.sleep(random.uniform(0.6, 1.1))
         last_height = driver.execute_script("return arguments[0].scrollHeight", scroll_container)
-        time.sleep(random.uniform(3.5, 5.5))
+        time.sleep(random.uniform(0.4, 0.9))
         i = 0
+        if stop_scroll_callback and stop_scroll_callback():
+            return False
         while True:
             driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", scroll_container)
-            time.sleep(random.uniform(3.5, 5.5))
-            new_height = driver.execute_script("return arguments[0].scrollHeight", scroll_container)
+            wait_started = time.time()
+            new_height = last_height
+
+            while (time.time() - wait_started) < random.uniform(load_timeout * 0.9, load_timeout * 1.1):
+                time.sleep(random.uniform(poll_interval * 0.8, poll_interval * 1.2))
+                if stop_scroll_callback and stop_scroll_callback():
+                    return False
+                new_height = driver.execute_script("return arguments[0].scrollHeight", scroll_container)
+                if new_height > last_height:
+                    growth = new_height - last_height
+                    extra_pause = min(1.6, settle_delay + (growth / 2500))
+                    time.sleep(random.uniform(extra_pause * 0.7, extra_pause * 1.2))
+                    break
+
             i += 1
             if new_height == last_height:
                 return False
             last_height = new_height
+            time.sleep(random.uniform(0.35, 0.75))
             if i >= 10 and limit_scrolling:
                 return False
     except Exception as e:
@@ -548,8 +672,9 @@ def click_more_button(driver):
 def save_comments(driver, POST_URL, target_page, page_name):
     print("[INFO] Opening post...")
     driver.get(POST_URL)
-    time.sleep(random.uniform(5, 7))
-    try_press_cancel_button(driver)
+    wait_for_post_content(driver, timeout=12)
+    human_pause(0.4, 1.0)
+    retry_on_stale(lambda: try_press_cancel_button(driver), "closing overlay")
     print("[INFO] Loading comments...")
     scroll_and_load_comments(driver)
 
@@ -574,9 +699,10 @@ def save_comments(driver, POST_URL, target_page, page_name):
 
 
 def find_scroll_elements_by_scroll_properties(driver, element_owner):
-    time.sleep(random.uniform(2, 4))
+    wait_for_document_ready(driver, timeout=8)
+    human_pause(0.15, 0.4)
     try_press_cancel_button(driver)
-    time.sleep(random.uniform(2, 4))
+    human_pause(0.15, 0.4)
     try:
         elements = driver.find_elements(By.TAG_NAME, element_owner)
         candidates = []
@@ -607,17 +733,20 @@ def find_scroll_element_by_scroll_properties(driver, element_owner):
     return containers[0] if containers else None
 
 
-def collect_all_hrefs(container_element, target_page, number_of_posts):
-    hrefs = []
-    seen_hrefs = set()
+def collect_all_hrefs(container_element, target_page, number_of_posts, href_buffer=None, seen_hrefs=None, skip_hrefs=None):
+    hrefs = href_buffer if href_buffer is not None else []
+    known_hrefs = seen_hrefs if seen_hrefs is not None else set(hrefs)
+    ignored_hrefs = skip_hrefs if skip_hrefs is not None else set()
     try:
         anchor_elements = container_element.find_elements(By.TAG_NAME, "a")
         for anchor in anchor_elements:
             href = anchor.get_attribute("href")
             if href:
                 normalized_href = href.replace(f"/{target_page}", "")
-                if normalized_href not in seen_hrefs:
-                    seen_hrefs.add(normalized_href)
+                if normalized_href in ignored_hrefs:
+                    continue
+                if normalized_href not in known_hrefs:
+                    known_hrefs.add(normalized_href)
                     hrefs.append(normalized_href)
         print(f"[INFO] Collected {len(hrefs)} post links.")
         return hrefs[0:number_of_posts]
@@ -644,54 +773,82 @@ def get_page_name(driver):
     return None
 
 
-def load_all_posts(driver, target_page, number_of_posts):
-    time.sleep(random.uniform(2, 4))
+def load_all_posts(driver, target_page, number_of_posts, existing_post_hrefs=None):
     driver.get(f"https://www.instagram.com/{target_page}/")
-    time.sleep(random.uniform(2, 4))
+    wait_for_profile_content(driver, timeout=12)
+    human_pause(0.4, 0.9)
     page_name = get_page_name(driver) or target_page
-    time.sleep(random.uniform(2, 4))
+    human_pause(0.15, 0.4)
     scroll_container = find_scroll_element_by_scroll_properties(driver, "html")
-    time.sleep(random.uniform(2, 4))
+    human_pause(0.15, 0.4)
     hrefs = []
+    seen_hrefs = set()
+    skip_hrefs = set(existing_post_hrefs or [])
+    reached_post_limit = False
+
+    def refresh_hrefs_and_check_limit():
+        nonlocal hrefs, reached_post_limit
+        container_element = driver.find_element(
+            By.XPATH,
+            POST_CONTAINER_XPATH
+        )
+        hrefs = collect_all_hrefs(
+            container_element,
+            target_page,
+            number_of_posts,
+            href_buffer=hrefs,
+            seen_hrefs=seen_hrefs,
+            skip_hrefs=skip_hrefs,
+        )
+        if len(hrefs) >= number_of_posts:
+            reached_post_limit = True
+            print(f"[INFO] Reached requested number of posts: {number_of_posts}.")
+            return True
+        return False
+
     while True:
         try:
-            container_element = driver.find_element(
-                By.XPATH,
-                "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') and contains(., 'position: relative')]]"
-            )
-            hrefs = collect_all_hrefs(container_element, target_page, number_of_posts)
-            if len(hrefs) >= number_of_posts:
-                print(f"[INFO] Reached requested number of posts: {number_of_posts}.")
+            if refresh_hrefs_and_check_limit():
                 break
 
-            if not try_scroll_page(driver, scroll_container, limit_scrolling=True):
-                print("[INFO] All posts loaded.")
+            if not try_scroll_page(
+                driver,
+                scroll_container,
+                limit_scrolling=True,
+                stop_scroll_callback=refresh_hrefs_and_check_limit,
+            ):
+                if not reached_post_limit:
+                    print("[INFO] All posts loaded.")
                 break
-            time.sleep(random.uniform(2, 4))
+            human_pause(0.15, 0.4)
         except Exception as e:
             print(f"[ERROR] Post loading error: {e}")
             break
     return hrefs, page_name
 
 
-def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
+def extract_data(USERNAME, PASSWORD, target_page, number_of_posts, existing_post_hrefs=None):
     delete_previos_files()
     user_agent = UserAgent()
     log = ""
     posts_requested = int(number_of_posts)
+    new_posts_found = 0
     posts_loaded = 0
     collected_comment_rows = 0
     saved_files = []
+    existing_post_hrefs = set(existing_post_hrefs or [])
     driver = setup_driver(user_agent)
-    time.sleep(random.uniform(3, 5))
+    human_pause(0.4, 0.9)
     driver.refresh()
-    time.sleep(random.uniform(3, 5))
+    wait_for_document_ready(driver, timeout=10)
+    human_pause(0.4, 0.9)
 
     try:
         print("[INFO] Opening Instagram...\n")
         log += "[INFO] Opening Instagram...\n"  # Add log message
         driver.get("https://www.instagram.com/")
-        time.sleep(random.uniform(3, 5))
+        wait_for_document_ready(driver, timeout=12)
+        human_pause(0.4, 0.9)
         print("[INFO] Loading cookies...\n")
         log += "[INFO] Loading cookies...\n"  # Add log message
         load_cookie_success = load_cookies(driver)
@@ -703,23 +860,46 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
             log += "[INFO] No valid cookies. Logging in.\n"  # Add failure log
         print("[INFO] Starting data collection...\n")
         log += "[INFO] Starting data collection...\n"  # Add log message
+        if existing_post_hrefs:
+            print(f"[INFO] Found {len(existing_post_hrefs)} existing post hrefs in DB for {target_page}.")
+            log += f"[INFO] Found {len(existing_post_hrefs)} existing post hrefs in DB for {target_page}.\n"
         if load_cookie_success:
-            posts, page_name = load_all_posts(driver, target_page, number_of_posts)
+            posts, page_name = load_all_posts(
+                driver,
+                target_page,
+                number_of_posts,
+                existing_post_hrefs=existing_post_hrefs,
+            )
+            new_posts_found = len(posts)
             for i in posts:
-                result = save_comments(driver, i, target_page, page_name)
-                posts_loaded += 1
-                collected_comment_rows += result["comments_collected"]
-                saved_files.append(result["output_path"])
-        else:
-            login_success = login_to_instagram(driver, USERNAME, PASSWORD)
-            if login_success:
-                save_cookies(driver)
-                posts, page_name = load_all_posts(driver, target_page, number_of_posts)
-                for i in posts:
+                try:
                     result = save_comments(driver, i, target_page, page_name)
                     posts_loaded += 1
                     collected_comment_rows += result["comments_collected"]
                     saved_files.append(result["output_path"])
+                except Exception as e:
+                    print(f"[WARN] Skipping post after retries failed: {i}. Reason: {e}")
+                    log += f"[WARN] Skipping post after retries failed: {i}. Reason: {e}\n"
+        else:
+            login_success = login_to_instagram(driver, USERNAME, PASSWORD)
+            if login_success:
+                save_cookies(driver)
+                posts, page_name = load_all_posts(
+                    driver,
+                    target_page,
+                    number_of_posts,
+                    existing_post_hrefs=existing_post_hrefs,
+                )
+                new_posts_found = len(posts)
+                for i in posts:
+                    try:
+                        result = save_comments(driver, i, target_page, page_name)
+                        posts_loaded += 1
+                        collected_comment_rows += result["comments_collected"]
+                        saved_files.append(result["output_path"])
+                    except Exception as e:
+                        print(f"[WARN] Skipping post after retries failed: {i}. Reason: {e}")
+                        log += f"[WARN] Skipping post after retries failed: {i}. Reason: {e}\n"
             else:
                 print(f"[WARN] Login failed: still at {driver.current_url}\n")
                 log += f"[WARN] Login failed: still at {driver.current_url}\n"  # Add failure log
@@ -736,6 +916,7 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts):
         "log": log,
         "target_page": target_page,
         "posts_requested": posts_requested,
+        "new_posts_found": new_posts_found,
         "posts_loaded": posts_loaded,
         "comments_collected": collected_comment_rows,
         "saved_files": saved_files,
@@ -760,10 +941,3 @@ if __name__ == "__main__":
         raise ValueError(f"Stored Instagram credentials are incomplete for user '{app_username}'.")
 
     extract_data(instagram_username, instagram_password, target_page, int(number_of_posts))
-
-
-
-
-
-
-

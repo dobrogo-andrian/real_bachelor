@@ -6,6 +6,7 @@ CREATE TABLE [dbo].[EnrichedComments](
     [PostTime] [datetime2](0) NULL,
     [Comment] [nvarchar](max) NOT NULL,
     [CommentTime] [datetime2](0) NULL,
+    [CommentOrder] [int] NULL,
     [CommentLikes] [int] NULL,
     [MainLanguage] [nvarchar](20) NOT NULL,
     [FilteredComment] [nvarchar](max) NULL,

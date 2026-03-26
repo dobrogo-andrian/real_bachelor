@@ -300,6 +300,52 @@
 				let pendingAnalysisMode = null;
 				let pendingAnalysisLabel = null;
 
+				function redirectToLogin(nextUrl = window.location.pathname) {
+					window.location.href = `/login?next=${encodeURIComponent(nextUrl)}`;
+				}
+
+				async function tryRefreshSession() {
+					const refreshResponse = await fetch('/refresh', {
+						method: 'POST',
+						credentials: 'include',
+						headers: {
+							'Accept': 'application/json'
+						}
+					});
+
+					return refreshResponse.ok;
+				}
+
+				async function ensureAuthenticatedResponse(response) {
+					if (response.redirected && response.url.includes('/login')) {
+						redirectToLogin(window.location.pathname);
+						return null;
+					}
+
+					if (response.status !== 401) {
+						return response;
+					}
+
+					let payload = null;
+					try {
+						payload = await response.json();
+					} catch (error) {
+						redirectToLogin(window.location.pathname);
+						return null;
+					}
+
+					if (payload?.action === 'refresh') {
+						const refreshed = await tryRefreshSession();
+						if (refreshed) {
+							window.location.reload();
+							return null;
+						}
+					}
+
+					redirectToLogin(window.location.pathname);
+					return null;
+				}
+
 				function setProcessingButtonsDisabled(disabled) {
 					processingButtons.forEach((button) => {
 						button.disabled = disabled;
@@ -359,14 +405,20 @@
 					setProcessingButtonsDisabled(true);
 
 					try {
-						const response = await fetch('/enrich-comments', {
+						const rawResponse = await fetch('/enrich-comments', {
 							method: 'POST',
 							headers: {
 								'Content-Type': 'application/json',
 								'Accept': 'application/json'
 							},
+							credentials: 'include',
 							body: JSON.stringify(payload)
 						});
+
+						const response = await ensureAuthenticatedResponse(rawResponse);
+						if (!response) {
+							return;
+						}
 
 						const responseData = await response.json();
 						if (!response.ok) {
@@ -424,14 +476,20 @@
 
 				  try {
 					// Send POST request to the backend
-					const response = await fetch('/process-data', {
+					const rawResponse = await fetch('/process-data', {
 					  method: 'POST',
 					  headers: {
-						'Content-Type': 'application/json'
+						'Content-Type': 'application/json',
+						'Accept': 'application/json'
 					  },
 					  credentials: 'include',
 					  body: JSON.stringify(payload)
 					});
+
+					const response = await ensureAuthenticatedResponse(rawResponse);
+					if (!response) {
+						return;
+					}
 
 					if (response.ok) {
 					  const data = await response.json();
@@ -449,11 +507,11 @@
 					} else {
 					  const errorData = await response.json();
 					  console.error('Error:', errorData);
-					  document.getElementById('result-output').textContent = `Error: ${errorData.error}`;
+					  document.getElementById('response-p').textContent = `Error: ${errorData.error}`;
 					}
 				  } catch (error) {
 					console.error('Error fetching data:', error);
-					document.getElementById('result-output').textContent = `Error: ${error.message}`;
+					document.getElementById('response-p').textContent = `Error: ${error.message}`;
 				  }
 				});
 			</script>

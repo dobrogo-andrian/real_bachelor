@@ -16,6 +16,7 @@ from static.backend.db_connection import (
     fetch_user,
     fetch_user_instagram_credentials,
     fetch_distinct_comment_dimensions,
+    fetch_existing_post_hrefs,
     fetch_advanced_comment_dimensions,
     fetch_enriched_comment_preview,
     fetch_enriched_comment_rows,
@@ -495,7 +496,35 @@ def process_data_endpoint():
         if not instagram_username or not instagram_password:
             return jsonify({'error': 'Instagram credentials are missing for the logged in user.'}), 400
 
-        extraction_result = extract_data(instagram_username, instagram_password, target_page, number_of_posts)
+        existing_post_hrefs = fetch_existing_post_hrefs(target_page)
+        logger.debug(
+            "Found %s existing post hrefs for page_id=%s before extraction",
+            len(existing_post_hrefs),
+            target_page,
+        )
+
+        extraction_result = extract_data(
+            instagram_username,
+            instagram_password,
+            target_page,
+            number_of_posts,
+            existing_post_hrefs=existing_post_hrefs,
+        )
+        if extraction_result.get('new_posts_found', 0) == 0:
+            return jsonify(
+                {
+                    'success': True,
+                    'result': {
+                        'target_page': target_page,
+                        'posts_requested': number_of_posts,
+                        'posts_loaded': 0,
+                        'comments_collected': 0,
+                        'rows_loaded_to_db': 0,
+                        'files_processed': 0,
+                        'message': 'No new posts found. Existing database posts were skipped.',
+                    }
+                }
+            ), 200
         if extraction_result.get('posts_loaded', 0) == 0 or not extraction_result.get('saved_files'):
             return jsonify(
                 {
