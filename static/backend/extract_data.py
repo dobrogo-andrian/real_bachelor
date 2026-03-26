@@ -417,7 +417,7 @@ def try_scroll_page(driver, scroll_container, limit_scrolling=False, stop_scroll
 
             while (time.time() - wait_started) < random.uniform(load_timeout * 0.9, load_timeout * 1.1):
                 time.sleep(random.uniform(poll_interval * 0.8, poll_interval * 1.2))
-                time.sleep(random.uniform(0.4, 0.9))
+                time.sleep(random.uniform(1.4, 1.9))
                 if stop_scroll_callback and stop_scroll_callback():
                     return False
                 new_height = driver.execute_script("return arguments[0].scrollHeight", scroll_container)

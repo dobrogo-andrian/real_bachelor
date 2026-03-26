@@ -87,6 +87,18 @@
                 margin-bottom: 0.75rem;
             }
 
+            .analysis-post-link {
+                color: #8ecae6;
+                text-decoration: none;
+                border-bottom: 1px solid rgba(142, 202, 230, 0.42);
+            }
+
+            .analysis-post-link:hover,
+            .analysis-post-link:focus {
+                color: #d8f0ff;
+                border-bottom-color: rgba(216, 240, 255, 0.9);
+            }
+
             .analysis-status {
                 margin: 0;
             }
@@ -364,6 +376,50 @@
                     return 1;
                 }
 
+                function shouldShowDenseValueLabels(itemCount) {
+                    return itemCount <= 24;
+                }
+
+                function buildSparseValueLabelIndexSet(values) {
+                    const numericValues = (values || []).map(function (value) { return Number(value) || 0; });
+                    const count = numericValues.length;
+                    if (count <= 24) {
+                        return new Set(numericValues.map(function (_value, index) { return index; }));
+                    }
+
+                    const maxValue = Math.max(...numericValues, 1);
+                    const minDistance = count > 80 ? 5 : (count > 50 ? 4 : 3);
+                    const candidates = numericValues
+                        .map(function (value, index) {
+                            const prev = index > 0 ? numericValues[index - 1] : -Infinity;
+                            const next = index < count - 1 ? numericValues[index + 1] : -Infinity;
+                            const isLocalPeak = value >= prev && value >= next;
+                            const prominence = value / maxValue;
+                            return { index: index, value: value, isLocalPeak: isLocalPeak, prominence: prominence };
+                        })
+                        .filter(function (item) {
+                            return item.value > 0 && item.isLocalPeak && item.prominence >= 0.2;
+                        })
+                        .sort(function (left, right) {
+                            if (right.value !== left.value) {
+                                return right.value - left.value;
+                            }
+                            return left.index - right.index;
+                        });
+
+                    const chosen = [];
+                    candidates.forEach(function (candidate) {
+                        const tooClose = chosen.some(function (picked) {
+                            return Math.abs(picked - candidate.index) < minDistance;
+                        });
+                        if (!tooClose) {
+                            chosen.push(candidate.index);
+                        }
+                    });
+
+                    return new Set(chosen);
+                }
+
                 function buildTrendPath(values, width, height, padding, maxValue, yOffset, valueScale) {
                     if (!values.length) {
                         return '';
@@ -416,9 +472,12 @@
                     }
 
                     return rows.map(function (row) {
+                        const postLabel = row.post_href
+                            ? `<a class="analysis-post-link" href="${escapeHtml(row.post_href)}" target="_blank" rel="noopener noreferrer">Post ${escapeHtml(row.post_index)}</a>`
+                            : `Post ${escapeHtml(row.post_index)}`;
                         return `
                             <tr>
-                                <td>${escapeHtml(row.post_index)}</td>
+                                <td>${postLabel}</td>
                                 <td>${escapeHtml(row.post_time)}</td>
                                 <td>${escapeHtml(row.total_comments)}</td>
                                 <td>${escapeHtml(row.positive_share)}%</td>
@@ -433,15 +492,17 @@
 
                 function renderSolidarityRows(rows) {
                     if (!rows.length) {
-                        return '<tr><td colspan="7">No post-language pair reached the 15% comment-share threshold or there was not enough data to compute solidarity.</td></tr>';
+                        return '<tr><td colspan="6">No posts reached the 15% comment-share threshold or there was not enough data to compute solidarity.</td></tr>';
                     }
 
                     return rows.map(function (row) {
+                        const postLabel = row.post_href
+                            ? `<a class="analysis-post-link" href="${escapeHtml(row.post_href)}" target="_blank" rel="noopener noreferrer">Post ${escapeHtml(row.post_index)}</a>`
+                            : `Post ${escapeHtml(row.post_index)}`;
                         return `
                             <tr>
-                                <td>${escapeHtml(row.post_index)}</td>
+                                <td>${postLabel}</td>
                                 <td>${escapeHtml(row.post_time)}</td>
-                                <td>${escapeHtml(row.language)}</td>
                                 <td>${escapeHtml(row.anchor_sentiment)}</td>
                                 <td>${escapeHtml(row.solidarity_score)}%</td>
                                 <td>${escapeHtml(row.comment_share)}%</td>
@@ -457,9 +518,12 @@
                     }
 
                     return rows.map(function (row) {
+                        const postTitle = row.post_href
+                            ? `<a class="analysis-post-link" href="${escapeHtml(row.post_href)}" target="_blank" rel="noopener noreferrer">Post ${escapeHtml(row.post_index)}</a>`
+                            : `Post ${escapeHtml(row.post_index)}`;
                         return `
                             <article class="analysis-comment-card">
-                                <h3>Post ${escapeHtml(row.post_index)}</h3>
+                                <h3>${postTitle}</h3>
                                 <p class="analysis-meta">${escapeHtml(row.language)} · ${escapeHtml(row.sentiment)} · ${escapeHtml(row.likes)} likes</p>
                                 <div class="analysis-comment-body">${escapeHtml(row.comment)}</div>
                             </article>
@@ -489,6 +553,8 @@
                         : '';
 
                     const labelStep = getAxisLabelStep(items);
+                    const showValueLabels = shouldShowDenseValueLabels(items.length);
+                    const labeledValueIndexes = buildSparseValueLabelIndexSet(items.map(function (item) { return item.value; }));
                     const bars = items.map(function (item, index) {
                         const value = Number(item.value) || 0;
                         const h = (value / maxValue) * plotHeight;
@@ -496,10 +562,21 @@
                         const y = padding.top + plotHeight - h;
                         const w = barWidth * 0.7;
                         const showLabel = index % labelStep === 0;
-                        return `
+                        const barContent = `
                             <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${color}"></rect>
                             ${showLabel ? `<text x="${x + w / 2}" y="${padding.top + plotHeight + 18}" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="10">${escapeHtml(item.label)}</text>` : ''}
-                            <text x="${x + w / 2}" y="${y - 6}" text-anchor="middle" fill="rgba(255,255,255,0.88)" font-size="10">${value}</text>
+                            ${showValueLabels || labeledValueIndexes.has(index) ? `<text x="${x + w / 2}" y="${y - 6}" text-anchor="middle" fill="rgba(255,255,255,0.88)" font-size="10">${value}</text>` : ''}
+                        `;
+                        if (item.post_href) {
+                            return `
+                                <a href="${escapeHtml(item.post_href)}" target="_blank" rel="noopener noreferrer">
+                                    <title>Open post ${escapeHtml(item.label)}</title>
+                                    ${barContent}
+                                </a>
+                            `;
+                        }
+                        return `
+                            ${barContent}
                         `;
                     }).join('');
 
@@ -542,6 +619,10 @@
                     });
 
                     const labelStep = getAxisLabelStep(items);
+                    const showValueLabels = shouldShowDenseValueLabels(items.length);
+                    const labeledValueIndexes = buildSparseValueLabelIndexSet(items.map(function (item) {
+                        return keys.reduce(function (sum, key) { return sum + (Number(item[key]) || 0); }, 0);
+                    }));
                     const bars = items.map(function (item, index) {
                         let runningHeight = 0;
                         const x = padding.left + index * barWidth + barWidth * 0.15;
@@ -567,13 +648,21 @@
                                 return `<text x="${x + w / 2}" y="${Math.max(12, topLabelBaseY - (keyIndex * 12))}" text-anchor="middle" fill="${colors[key]}" font-size="10" font-weight="700">${value}</text>`;
                             }).join('')
                             : '';
-
-                        return `
+                        const stackedContent = `
                             ${segments}
                             ${showLabel ? `<text x="${x + w / 2}" y="${padding.top + plotHeight + 18}" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="10">${escapeHtml(item.label)}</text>` : ''}
                             ${valueLabels}
-                            ${options.showTotals === false ? '' : `<text x="${x + w / 2}" y="${padding.top + plotHeight - runningHeight - 6}" text-anchor="middle" fill="rgba(255,255,255,0.88)" font-size="10">${total}</text>`}
+                            ${options.showTotals === false ? '' : (showValueLabels || labeledValueIndexes.has(index) ? `<text x="${x + w / 2}" y="${padding.top + plotHeight - runningHeight - 6}" text-anchor="middle" fill="rgba(255,255,255,0.88)" font-size="10">${total}</text>` : '')}
                         `;
+                        if (item.post_href) {
+                            return `
+                                <a href="${escapeHtml(item.post_href)}" target="_blank" rel="noopener noreferrer">
+                                    <title>Open post ${escapeHtml(item.label)}</title>
+                                    ${stackedContent}
+                                </a>
+                            `;
+                        }
+                        return stackedContent;
                     }).join('');
 
                     return `
@@ -649,8 +738,20 @@
                     const padding = { top: 18, right: 18, bottom: 52, left: 42 };
                     const plotWidth = width - padding.left - padding.right;
                     const plotHeight = height - padding.top - padding.bottom;
-                    const longest = Math.max(...seriesList.map(function (series) { return series.points.length; }), 1);
-                    const xStep = longest > 1 ? plotWidth / (longest - 1) : plotWidth;
+                    const axisLabels = Array.from(new Set(seriesList.flatMap(function (series) {
+                        return (series.points || []).map(function (point) { return String(point.label || ''); });
+                    }))).sort(function (left, right) {
+                        const leftNumber = Number(left);
+                        const rightNumber = Number(right);
+                        const leftIsNumber = Number.isFinite(leftNumber);
+                        const rightIsNumber = Number.isFinite(rightNumber);
+                        if (leftIsNumber && rightIsNumber) {
+                            return leftNumber - rightNumber;
+                        }
+                        return left.localeCompare(right, undefined, { numeric: true });
+                    });
+                    const xStep = axisLabels.length > 1 ? plotWidth / (axisLabels.length - 1) : plotWidth;
+                    const labelToIndex = new Map(axisLabels.map(function (label, index) { return [label, index]; }));
                     const maxValue = options.maxValue || Math.max(...seriesList.flatMap(function (series) {
                         return series.points.map(function (point) { return Number(point.value) || 0; });
                     }), 1);
@@ -665,8 +766,9 @@
                     });
 
                     const lines = seriesList.map(function (series) {
-                        const points = series.points.map(function (point, index) {
-                            const x = padding.left + (index * xStep);
+                        const points = series.points.map(function (point) {
+                            const axisIndex = labelToIndex.get(String(point.label || '')) || 0;
+                            const x = padding.left + (axisIndex * xStep);
                             const y = padding.top + plotHeight - ((Number(point.value) || 0) / maxValue) * plotHeight;
                             return { x: x, y: y, label: point.label, value: Number(point.value) || 0 };
                         });
@@ -679,14 +781,13 @@
                         return `<path d="${path}" fill="none" stroke="${series.color}" stroke-width="2.5"></path>${dots}`;
                     }).join('');
 
-                    const axisPoints = (seriesList[0] && seriesList[0].points ? seriesList[0].points : []);
-                    const labelStep = getAxisLabelStep(axisPoints);
-                    const labels = axisPoints.map(function (point, index) {
+                    const labelStep = getAxisLabelStep(axisLabels);
+                    const labels = axisLabels.map(function (label, index) {
                         if (index % labelStep !== 0) {
                             return '';
                         }
                         const x = padding.left + (index * xStep);
-                        return `<text x="${x}" y="${padding.top + plotHeight + 18}" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="10">${escapeHtml(point.label)}</text>`;
+                        return `<text x="${x}" y="${padding.top + plotHeight + 18}" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="10">${escapeHtml(label)}</text>`;
                     }).join('');
 
                     return `
@@ -703,6 +804,23 @@
                             ${labels}
                         </svg>
                     `;
+                }
+
+                function buildMeanSeries(points, windowSize) {
+                    const safeWindowSize = Math.max(1, Number(windowSize) || 1);
+                    const halfWindow = Math.floor(safeWindowSize / 2);
+                    return (points || []).map(function (point, index, list) {
+                        const start = Math.max(0, index - halfWindow);
+                        const end = Math.min(list.length, index + halfWindow + 1);
+                        const window = list.slice(start, end);
+                        const avg = window.reduce(function (sum, item) {
+                            return sum + (Number(item.value) || 0);
+                        }, 0) / Math.max(window.length, 1);
+                        return {
+                            label: point.label,
+                            value: Math.round(avg * 100) / 100
+                        };
+                    });
                 }
 
                 function renderLegend(items) {
@@ -725,6 +843,13 @@
                             points: series.points || []
                         };
                     });
+                    const solidarityTrendSeries = (charts.solidarity_trend_by_language || []).map(function (series, index) {
+                        return {
+                            name: series.name,
+                            color: languageTrendColors[index % languageTrendColors.length],
+                            points: series.points || []
+                        };
+                    });
                     const overallTrend = [{
                         name: 'overall',
                         color: '#90be6d',
@@ -735,7 +860,11 @@
                         <article class="analysis-chart-card span-two">
                             <h3>Comments by post</h3>
                             ${buildBarChartSvg((charts.comments_by_post || []).map(function (item) {
-                                return { label: String(item.label || '').replace(/^P/, ''), value: item.value };
+                                return {
+                                    label: String(item.label || '').replace(/^P/, ''),
+                                    value: item.value,
+                                    post_href: item.post_href
+                                };
                             }), { title: 'Comments by post', color: '#6ac3ff', showTrend: true, trendOffset: 16 })}
                             <p class="analysis-chart-note">Matches the old countplot by post id, with a moving-average trend line in the background.</p>
                         </article>
@@ -763,6 +892,7 @@
                                     positive: item.positive,
                                     neutral: item.neutral,
                                     negative: item.negative,
+                                    post_href: item.post_href,
                                     positive_share: item.positive_share,
                                     neutral_share: item.neutral_share,
                                     negative_share: item.negative_share
@@ -807,9 +937,9 @@
                             ${buildLineChartSvg([{
                                 name: 'overall',
                                 color: '#90be6d',
-                                points: (charts.positivity_trend_overall || []).map(function (point) {
+                                points: buildMeanSeries((charts.positivity_trend_overall || []).map(function (point) {
                                     return { label: String(point.label || '').replace(/^P/, ''), value: point.value };
-                                })
+                                }), 3)
                             }], { title: 'Overall positivity trend', maxValue: 100, percent: true })}
                             ${renderLegend([{ label: 'Overall positivity', color: '#90be6d' }])}
                             <p class="analysis-chart-note">Y-axis shows positive comments as a percentage of total comments per post.</p>
@@ -820,13 +950,39 @@
                                 return {
                                     name: series.name,
                                     color: series.color,
-                                    points: (series.points || []).map(function (point) {
+                                    points: buildMeanSeries((series.points || []).map(function (point) {
                                         return { label: String(point.label || '').replace(/^P/, ''), value: point.value };
-                                    })
+                                    }), 5)
                                 };
                             }), { title: 'Positivity trend by language', maxValue: 100, percent: true })}
                             ${renderLegend(trendSeries.map(function (series) { return { label: series.name, color: series.color }; }))}
-                            <p class="analysis-chart-note">Y-axis shows per-language positivity percentage for each post.</p>
+                            <p class="analysis-chart-note">This chart uses a 3-point mean instead of raw per-post values.</p>
+                        </article>
+                        <article class="analysis-chart-card">
+                            <h3>Overall solidarity trend</h3>
+                            ${buildLineChartSvg([{
+                                name: 'overall solidarity',
+                                color: '#f28482',
+                                points: buildMeanSeries((charts.solidarity_trend_overall || []).map(function (point) {
+                                    return { label: String(point.label || '').replace(/^P/, ''), value: point.value };
+                                }), 3)
+                            }], { title: 'Overall solidarity trend', maxValue: 100, percent: true })}
+                            ${renderLegend([{ label: 'Overall solidarity', color: '#f28482' }])}
+                            <p class="analysis-chart-note">This chart uses a 3-point mean instead of raw per-post values.</p>
+                        </article>
+                        <article class="analysis-chart-card">
+                            <h3>Solidarity trend by top languages</h3>
+                            ${buildLineChartSvg(solidarityTrendSeries.map(function (series) {
+                                return {
+                                    name: series.name,
+                                    color: series.color,
+                                    points: buildMeanSeries((series.points || []).map(function (point) {
+                                        return { label: String(point.label || '').replace(/^P/, ''), value: point.value };
+                                    }), 5)
+                                };
+                            }), { title: 'Solidarity trend by language', maxValue: 100, percent: true })}
+                            ${renderLegend(solidarityTrendSeries.map(function (series) { return { label: series.name, color: series.color }; }))}
+                            <p class="analysis-chart-note">This chart uses a 3-point mean instead of raw per-post values.</p>
                         </article>
                     `;
                 }
@@ -887,7 +1043,6 @@
                                         <tr>
                                             <th>Post</th>
                                             <th>Post time</th>
-                                            <th>Language</th>
                                             <th>Anchor</th>
                                             <th>Solidarity</th>
                                             <th>Comment share</th>

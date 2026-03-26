@@ -33,6 +33,14 @@ def _build_post_key(page_id, page_name, post_time):
     return f"{_normalize_text(page_id)}|{_normalize_text(page_name)}|{post_time_value}"
 
 
+def _pick_post_href(rows):
+    for row in rows or []:
+        href = _normalize_text(row.get("PostHref"))
+        if href:
+            return href
+    return ""
+
+
 def _safe_percentage(part, total):
     if not total:
         return 0.0
@@ -107,6 +115,7 @@ def fetch_enriched_comments_for_page(selection_type, selection_value):
             [CommentHash],
             [PageName],
             [PageID],
+            [PostHref],
             [PostTime],
             [Comment],
             [CommentTime],
@@ -142,29 +151,26 @@ def _build_chart_visibility(filters, rows, language_counts, sentiment_counts, or
     distinct_sentiments = len([sentiment for sentiment in sentiment_counts if sentiment])
     distinct_posts = len(ordered_posts)
 
-    has_language_filter = bool(_normalize_text((filters or {}).get("language")))
-    has_sentiment_filter = bool(_normalize_text((filters or {}).get("sentiment")))
-
     visibility = {
         "comments_by_post": distinct_posts > 1,
-        "comments_by_language": distinct_languages > 1 and not has_language_filter,
-        "sentiment_by_language": distinct_languages > 1 and distinct_sentiments > 1 and not (has_language_filter or has_sentiment_filter),
-        "sentiment_by_post": distinct_posts > 1 and distinct_sentiments > 1 and not has_sentiment_filter,
+        "comments_by_language": distinct_languages > 1,
+        "sentiment_by_language": distinct_languages > 1 and distinct_sentiments > 1,
+        "sentiment_by_post": distinct_posts > 1 and distinct_sentiments > 1,
         "comment_length_histogram": len(rows) > 1,
-        "avg_length_by_sentiment": distinct_sentiments > 1 and not has_sentiment_filter,
-        "avg_length_by_language_sentiment": distinct_languages > 1 and distinct_sentiments > 1 and not (has_language_filter or has_sentiment_filter),
-        "solidarity_distribution_by_language": distinct_posts > 1 and distinct_languages > 1 and not has_language_filter,
-        "positivity_trend_overall": distinct_posts > 1 and distinct_sentiments > 1 and not has_sentiment_filter,
-        "positivity_trend_by_language": distinct_posts > 1 and distinct_languages > 1 and distinct_sentiments > 1 and not (has_language_filter or has_sentiment_filter),
+        "avg_length_by_sentiment": distinct_sentiments > 1,
+        "avg_length_by_language_sentiment": distinct_languages > 1 and distinct_sentiments > 1,
+        "solidarity_distribution_by_language": distinct_posts > 1 and distinct_languages > 1,
+        "positivity_trend_overall": distinct_posts > 1 and distinct_sentiments > 1,
+        "positivity_trend_by_language": distinct_posts > 1 and distinct_languages > 1 and distinct_sentiments > 1,
+        "solidarity_trend_overall": distinct_posts > 1,
+        "solidarity_trend_by_language": distinct_posts > 1 and distinct_languages > 1,
     }
 
     reasons = {}
-    if distinct_pages <= 1:
-        reasons["single_page_scope"] = "The current subset resolves to one page, so page-comparison charts are not needed."
-    if has_language_filter:
-        reasons["language_filter"] = "Language-comparison charts are hidden because the subset is already narrowed to one language."
-    if has_sentiment_filter:
-        reasons["sentiment_filter"] = "Sentiment-comparison charts are hidden because the subset is already narrowed to one sentiment."
+    if distinct_languages <= 1:
+        reasons["single_language_scope"] = "Language-comparison charts are hidden because fewer than two languages remain after filtering."
+    if distinct_sentiments <= 1:
+        reasons["single_sentiment_scope"] = "Sentiment-comparison and positivity charts are hidden because fewer than two sentiments remain after filtering."
     if distinct_posts <= 1:
         reasons["single_post_scope"] = "Post-level trend charts are hidden because fewer than two posts remain after filtering."
 
@@ -250,6 +256,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
     positivity_by_language = defaultdict(lambda: {"total": 0, "positive": 0, "posts": defaultdict(lambda: {"total": 0, "positive": 0})})
     positivity_by_post = []
     solidarity_breakdown = []
+    top_solidarity_posts = []
     sample_comments = []
 
     for index, (_post_key, post_rows) in enumerate(ordered_posts, start=1):
@@ -262,6 +269,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
             ),
         )
         post_time = sorted_rows[0]["_post_time_dt"] if sorted_rows else None
+        post_href = _pick_post_href(sorted_rows)
 
         post_sentiments = Counter()
         post_languages = Counter()
@@ -285,6 +293,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
         positivity_by_post.append({
             "post_index": index,
             "post_time": post_time.isoformat(sep=" ") if post_time else "Unknown",
+            "post_href": post_href,
             "total_comments": len(sorted_rows),
             "positive_share": _safe_percentage(positive_comments, len(sorted_rows)),
             "top_language": post_languages.most_common(1)[0][0] if post_languages else "unknown",
@@ -299,21 +308,37 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
             anchor_sentiment = post_anchor_sentiments.get(sorted_rows[0]["_post_key"], "unknown")
             comparable_rows = sorted_rows[1:] if len(sorted_rows) > 1 else []
             matches_by_language = defaultdict(lambda: {"matches": 0, "total": 0})
+            total_compared_comments = 0
+            total_matches = 0
             for row in comparable_rows:
                 language = _normalize_text(row.get("MainLanguage")).lower() or "unknown"
                 sentiment = _normalize_text(row.get("Sentiment")).lower() or "unknown"
+                total_compared_comments += 1
                 matches_by_language[language]["total"] += 1
                 if sentiment == anchor_sentiment:
+                    total_matches += 1
                     matches_by_language[language]["matches"] += 1
 
             for language, stats in sorted(matches_by_language.items()):
                 solidarity_breakdown.append({
                     "post_index": index,
                     "post_time": post_time.isoformat(sep=" ") if post_time else "Unknown",
+                    "post_href": post_href,
                     "language": language,
                     "anchor_sentiment": anchor_sentiment,
                     "match_percent": _safe_percentage(stats["matches"], stats["total"]),
                     "compared_comments": stats["total"],
+                })
+
+            if total_compared_comments:
+                top_solidarity_posts.append({
+                    "post_index": index,
+                    "post_time": post_time.isoformat(sep=" ") if post_time else "Unknown",
+                    "post_href": post_href,
+                    "anchor_sentiment": anchor_sentiment,
+                    "solidarity_score": _safe_percentage(total_matches, total_compared_comments),
+                    "compared_comments": total_compared_comments,
+                    "post_total_comments": len(sorted_rows),
                 })
 
         top_comment = max(
@@ -326,6 +351,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
         )
         sample_comments.append({
             "post_index": index,
+            "post_href": post_href,
             "sentiment": _normalize_text(top_comment.get("Sentiment")).lower() or "unknown",
             "language": _normalize_text(top_comment.get("MainLanguage")).lower() or "unknown",
             "likes": top_comment.get("CommentLikes") or 0,
@@ -345,28 +371,25 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
             "negative": sentiment_counter.get("negative", 0),
         })
 
-    top_solidarity_posts = []
-    post_comment_counts = {row["post_index"]: row["total_comments"] for row in positivity_by_post}
-    for row in solidarity_breakdown:
-        if row["language"] == "unknown":
-            continue
-        post_total_comments = post_comment_counts.get(row["post_index"], 0)
+    filtered_top_solidarity_posts = []
+    for row in top_solidarity_posts:
+        post_total_comments = row["post_total_comments"]
         comment_share = _safe_percentage(row["compared_comments"], post_total_comments)
         if comment_share < 15:
             continue
-        top_solidarity_posts.append({
+        filtered_top_solidarity_posts.append({
             "post_index": row["post_index"],
             "post_time": row["post_time"],
-            "language": row["language"],
+            "post_href": row["post_href"],
             "anchor_sentiment": row["anchor_sentiment"],
-            "solidarity_score": row["match_percent"],
+            "solidarity_score": row["solidarity_score"],
             "comment_share": comment_share,
             "compared_comments": row["compared_comments"],
             "post_total_comments": post_total_comments,
         })
 
-    top_solidarity_posts.sort(
-        key=lambda row: (-row["solidarity_score"], -row["comment_share"], row["post_index"], row["language"]),
+    filtered_top_solidarity_posts.sort(
+        key=lambda row: (-row["solidarity_score"], -row["comment_share"], row["post_index"]),
     )
 
     latest_processed_time = max(processed_times).isoformat(sep=" ") if processed_times else None
@@ -384,6 +407,14 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
             "label": f"P{row['post_index']}",
             "value": row["positive_share"],
         })
+
+    overall_solidarity_trend = [
+        {
+            "label": f"P{row['post_index']}",
+            "value": row["solidarity_score"],
+        }
+        for row in top_solidarity_posts
+    ]
 
     positivity_by_language_series = []
     overall_language_totals = {
@@ -410,6 +441,25 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
             "points": points,
         })
 
+    solidarity_by_language_posts = defaultdict(list)
+    for row in solidarity_breakdown:
+        if row["language"] == "unknown":
+            continue
+        solidarity_by_language_posts[row["language"]].append({
+            "label": f"P{row['post_index']}",
+            "value": row["match_percent"],
+        })
+
+    solidarity_by_language_series = []
+    for language in top_languages_for_trends:
+        points = solidarity_by_language_posts.get(language, [])
+        if not points:
+            continue
+        solidarity_by_language_series.append({
+            "name": language,
+            "points": points,
+        })
+
     solidarity_distribution = []
     solidarity_scores_by_language = defaultdict(list)
     for row in solidarity_breakdown:
@@ -423,7 +473,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
 
     charts = {
         "comments_by_post": [
-            {"label": f"P{row['post_index']}", "value": row["total_comments"]}
+            {"label": f"P{row['post_index']}", "value": row["total_comments"], "post_href": row["post_href"]}
             for row in positivity_by_post
         ],
         "comments_by_language": [
@@ -445,6 +495,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
                 "positive": row["sentiment_counts"]["positive"],
                 "neutral": row["sentiment_counts"]["neutral"],
                 "negative": row["sentiment_counts"]["negative"],
+                "post_href": row["post_href"],
                 "positive_share": row["sentiment_shares"]["positive"],
                 "neutral_share": row["sentiment_shares"]["neutral"],
                 "negative_share": row["sentiment_shares"]["negative"],
@@ -471,6 +522,8 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
         "solidarity_distribution_by_language": solidarity_distribution,
         "positivity_trend_overall": positivity_trend,
         "positivity_trend_by_language": positivity_by_language_series,
+        "solidarity_trend_overall": overall_solidarity_trend,
+        "solidarity_trend_by_language": solidarity_by_language_series,
     }
 
     summary = {
@@ -495,7 +548,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
         "language_breakdown": language_breakdown,
         "post_breakdown": positivity_by_post,
         "solidarity_breakdown": solidarity_breakdown,
-        "solidarity_top_posts": top_solidarity_posts[:5],
+        "solidarity_top_posts": filtered_top_solidarity_posts[:5],
         "sample_comments": sample_comments[:6],
         "charts": charts,
         "chart_visibility": chart_visibility,
