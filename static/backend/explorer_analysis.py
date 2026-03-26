@@ -115,7 +115,6 @@ def fetch_enriched_comments_for_page(selection_type, selection_value):
             [FilteredComment],
             [Sentiment],
             [ProcessedTime],
-            [UpdateTime],
             [Source]
         FROM [dbo].[EnrichedComments]
         WHERE [{filter_column}] = ?

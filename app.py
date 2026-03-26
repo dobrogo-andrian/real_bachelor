@@ -360,7 +360,6 @@ def faq():
             {"name": "CommentLikes", "role": "Engagement signal", "description": "Weights notable comments and highlights audience resonance."},
             {"name": "LoadTime", "role": "Ingestion audit", "description": "Tracks when comments were loaded into the warehouse."},
             {"name": "Source", "role": "Lineage", "description": "Separates web-ingested data from future loaders or imports."},
-            {"name": "UpdateTime", "role": "Change tracking", "description": "Indicates when an existing comment row was updated by MERGE."},
         ],
         "pipeline_steps": [
             {

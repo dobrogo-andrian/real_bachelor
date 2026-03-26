@@ -477,7 +477,6 @@ def fetch_enriched_comment_preview(filters, limit=100):
                 [FilteredComment],
                 [Sentiment],
                 [ProcessedTime],
-                [UpdateTime],
                 [Source]
             FROM [dbo].[EnrichedComments] AS EC
             {where_sql}
@@ -578,7 +577,6 @@ def fetch_enriched_comment_rows(filters):
                 [FilteredComment],
                 [Sentiment],
                 [ProcessedTime],
-                [UpdateTime],
                 [Source]
             FROM [dbo].[EnrichedComments] AS EC
             {where_sql}
