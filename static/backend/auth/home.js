@@ -1,15 +1,4 @@
-function expireCookie(name) {
-  document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`;
-}
-
-function clearSessionCookies() {
-  expireCookie('access_token_cookie');
-  expireCookie('refresh_token_cookie');
-  expireCookie('access_token');
-  expireCookie('refresh_token');
-  expireCookie('csrf_access_token');
-  expireCookie('csrf_refresh_token');
-}
+const session = window.CommentLabSession;
 
 async function loadHomeSessionState() {
   const indicator = document.getElementById('login-state-indicator');
@@ -63,13 +52,12 @@ async function loadHomeSessionState() {
           event.preventDefault();
 
           try {
-            const logoutResponse = await fetch('/logout', {
+            const logoutResponse = await session.fetchWithCsrf('/logout', {
               method: 'POST',
-              credentials: 'include',
             });
 
             if (logoutResponse.ok) {
-              clearSessionCookies();
+              session.clearSessionCookies();
               window.location.replace('/');
             }
           } catch (error) {

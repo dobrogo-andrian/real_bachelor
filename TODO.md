@@ -1,14 +1,12 @@
 # TODO
 
-## Security and Auth
-- [ ] Move `JWT_SECRET_KEY` to environment variable and document setup.
-- [ ] Enable CSRF protection for JWT cookies and handle CSRF tokens in frontend.
-
-## Backend and Data Pipeline
-- [ ] Remove side effects on import in `static/backend/extract_data.py` (guard with `if __name__ == "__main__":`).
-- [ ] Add input validation and error handling in `/process-data`.
-
-## Dev Experience
-- [ ] Add basic tests for auth flows and data pipeline utilities.
-- [ ] Add `.env` support and sample `.env.example`.
-
+## Security
+- [x] Replace SHA-256 password hashing with a slow password hashing algorithm such as Argon2id or bcrypt.
+- [ ] Prevent cross-user data access by introducing user ownership and authorization checks for comments, enrichment, analysis, and extraction workflows.
+- [ ] Remove `pickle`-based cookie deserialization for Instagram session reuse or replace it with a safer storage format and integrity controls.
+- [ ] Enforce secure production cookie settings (`JWT_COOKIE_SECURE`, `SameSite`, production-only debug off) and separate local/dev configuration from deployment defaults.
+- [ ] Add rate limiting or abuse controls for `/login`, `/process-data`, `/enrich-comments`, and analysis endpoints.
+- [ ] Stop returning raw exception messages to clients; return safe generic errors and keep detailed diagnostics only in server logs.
+- [ ] Make login responses resistant to username enumeration by using consistent auth failure messages and behavior.
+- [ ] Remove hardcoded absolute signup API origin and use same-origin requests consistently.
+- [ ] Restrict CORS to explicit trusted origins instead of the current open default.

@@ -1,10 +1,15 @@
 import os
 import logging
 import hashlib
+import hmac
 
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+from env_config import load_dotenv
+
+load_dotenv()
 
 from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory, make_response
 from static.backend.extract_data import extract_data
@@ -20,6 +25,7 @@ from static.backend.db_connection import (
     fetch_advanced_comment_dimensions,
     fetch_enriched_comment_preview,
     fetch_enriched_comment_rows,
+    update_user_password_hash,
 )
 from flask_cors import CORS
 from flask_jwt_extended import (
@@ -27,14 +33,15 @@ from flask_jwt_extended import (
     jwt_required, get_jwt_identity, set_access_cookies, set_refresh_cookies,
     unset_jwt_cookies
 )
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__, static_folder=None)
-app.config['JWT_SECRET_KEY'] = 'your-secret-key'
+app.config['JWT_SECRET_KEY'] = os.environ['JWT_SECRET_KEY']
 app.config['JWT_TOKEN_LOCATION'] = ['cookies']
 app.config['JWT_COOKIE_SECURE'] = False
 app.config['JWT_ACCESS_COOKIE_PATH'] = '/'
 app.config['JWT_REFRESH_COOKIE_PATH'] = '/refresh'
-app.config['JWT_COOKIE_CSRF_PROTECT'] = False
+app.config['JWT_COOKIE_CSRF_PROTECT'] = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -47,11 +54,33 @@ CORS(app)
 jwt = JWTManager(app)
 
 
+def _is_csrf_error(error):
+    return isinstance(error, str) and 'csrf' in error.lower()
+
+
+def hash_user_password(password):
+    return generate_password_hash(password, method='scrypt')
+
+
+def _is_legacy_sha256_hash(value):
+    return isinstance(value, str) and len(value) == 64 and all(ch in '0123456789abcdef' for ch in value.lower())
+
+
+def verify_user_password(stored_password_hash, provided_password):
+    if not stored_password_hash or provided_password is None:
+        return False, None
+
+    if _is_legacy_sha256_hash(stored_password_hash):
+        legacy_hash = hashlib.sha256(provided_password.encode()).hexdigest()
+        if hmac.compare_digest(stored_password_hash, legacy_hash):
+            return True, hash_user_password(provided_password)
+        return False, None
+
+    return check_password_hash(stored_password_hash, provided_password), None
+
+
 @app.route('/static/<path:filename>')
-@jwt_required()
 def static_proxy(filename):
-    current_user = get_jwt_identity()
-    logger.debug(f"Current user: {current_user}")
     return send_from_directory('static', filename)
 
 
@@ -92,8 +121,10 @@ def login():
 
         if user:
             stored_password_hash = user[0]
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
-            if password_hash == stored_password_hash:
+            password_valid, upgraded_password_hash = verify_user_password(stored_password_hash, password)
+            if password_valid:
+                if upgraded_password_hash:
+                    update_user_password_hash(username, upgraded_password_hash)
                 access_token = create_access_token(identity=username)
                 refresh_token = create_refresh_token(identity=username)
 
@@ -109,6 +140,7 @@ def login():
 
 
 @app.route('/logout', methods=['POST'])
+@jwt_required()
 def logout():
     response = jsonify({'message': 'Logout successful'})
     unset_jwt_cookies(response)
@@ -467,7 +499,7 @@ def signup():
         if not username or not password or not email or not instagram_login or not instagram_password:
             return jsonify({'error': 'All fields are required'}), 400
 
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        password_hash = hash_user_password(password)
 
         return insert_new_user(username, email, password_hash, instagram_login, instagram_password)
     return None
@@ -478,12 +510,27 @@ def signup():
 def process_data_endpoint():
     try:
         current_user = get_jwt_identity()
-        params = request.json.get('params', {})
-        target_page = params["param1"]
-        number_of_posts = int(params["param2"])
+        data = request.get_json(silent=True) or {}
+        params = data.get('params')
 
-        if not params:
+        if not isinstance(params, dict) or not params:
             return jsonify({'error': 'No parameters provided.'}), 400
+
+        target_page = str(params.get("param1", "")).strip()
+        if not target_page:
+            return jsonify({'error': 'Target page is required.'}), 400
+
+        raw_number_of_posts = params.get("param2")
+        if raw_number_of_posts in (None, ""):
+            return jsonify({'error': 'Number of posts is required.'}), 400
+
+        try:
+            number_of_posts = int(raw_number_of_posts)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Number of posts must be an integer.'}), 400
+
+        if number_of_posts <= 0:
+            return jsonify({'error': 'Number of posts must be greater than zero.'}), 400
 
         instagram_credentials = fetch_user_instagram_credentials(current_user)
         if not instagram_credentials:
@@ -606,6 +653,8 @@ def page_analysis_endpoint():
 @jwt.invalid_token_loader
 def invalid_token_callback(error):
     logger.debug(f"Invalid token error: {error}")
+    if _is_csrf_error(error):
+        return jsonify({"error": error, "action": "logout"}), 401
     if request.headers.get("Accept") == "application/json":
         return jsonify({"error": "Invalid token", "action": "logout"}), 401
     else:
@@ -626,6 +675,8 @@ def expired_token_callback(jwt_header, jwt_payload):
 @jwt.unauthorized_loader
 def missing_token_callback(error):
     logger.debug(f"Missing token error: {error}")
+    if _is_csrf_error(error):
+        return jsonify({"error": error, "action": "logout"}), 401
     if request.headers.get("Accept") == "application/json":
         return jsonify({"error": "Missing token", "action": "redirect_to_login"}), 401
     else:

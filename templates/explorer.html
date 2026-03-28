@@ -327,8 +327,10 @@
         <script src="../static/assets/js/breakpoints.min.js"></script>
         <script src="../static/assets/js/util.js"></script>
         <script src="../static/assets/js/main.js"></script>
+        <script src="../static/backend/auth/session.js"></script>
         <script>
             (function () {
+                const session = window.CommentLabSession;
                 const toggleNameButton = document.getElementById('toggle-page-name-selector');
                 const toggleIdButton = document.getElementById('toggle-page-id-selector');
                 const nameSelectorPanel = document.getElementById('page-name-selector-panel');
@@ -1117,7 +1119,7 @@
                     selectionResultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
                     try {
-                        const response = await fetch('/page-analysis', {
+                        const rawResponse = await session.fetchWithCsrf('/page-analysis', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -1128,6 +1130,11 @@
                                 selection_value: selectedValue
                             })
                         });
+
+                        const response = await session.ensureAuthenticatedResponse(rawResponse);
+                        if (!response) {
+                            return;
+                        }
 
                         const responseData = await response.json();
                         if (!response.ok) {

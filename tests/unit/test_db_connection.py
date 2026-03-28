@@ -66,11 +66,22 @@ class DbConnectionTests(unittest.TestCase):
         self.assertEqual(params, ["positive", "negative"])
 
     def test_get_db_connection(self):
-        with patch.object(db_module.pyodbc, "connect", return_value="conn") as mocked_connect:
+        with patch.dict(
+            "os.environ",
+            {
+                "DB_DRIVER": "ODBC Driver 17 for SQL Server",
+                "DB_SERVER": "localhost",
+                "DB_NAME": "social-media-optimizer",
+                "DB_USER": "social-media-optimizer",
+                "DB_PASSWORD": "social-media-optimizer",
+            },
+            clear=False,
+        ), patch.object(db_module.pyodbc, "connect", return_value="conn") as mocked_connect:
             conn = db_module.get_db_connection()
 
         self.assertEqual(conn, "conn")
         self.assertIn("SERVER=localhost", mocked_connect.call_args.args[0])
+        self.assertIn("PWD=social-media-optimizer", mocked_connect.call_args.args[0])
 
     def test_bytes_to_blob(self):
         blob, buffer = db_module._bytes_to_blob(b"abc")
@@ -162,6 +173,21 @@ class DbConnectionTests(unittest.TestCase):
 
         self.assertEqual(user, ("hash",))
         self.assertIn("SELECT PasswordHash FROM Users", cursor.executed[0][0])
+        self.assertTrue(cursor.closed)
+        self.assertTrue(conn.close_called)
+
+    def test_update_user_password_hash(self):
+        cursor = FakeCursor()
+        conn = FakeConnection(cursor)
+
+        with patch.object(db_module, "get_db_connection", return_value=conn):
+            db_module.update_user_password_hash("alice", "scrypt:hash")
+
+        self.assertIn("UPDATE Users", cursor.executed[0][0])
+        self.assertEqual(cursor.executed[0][1], ("scrypt:hash", "alice"))
+        self.assertTrue(conn.commit_called)
+        self.assertTrue(cursor.closed)
+        self.assertTrue(conn.close_called)
 
     def test_fetch_user_instagram_credentials(self):
         cursor = FakeCursor(fetchone_values=[(b"login", b"password"), None])

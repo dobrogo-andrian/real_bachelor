@@ -1,5 +1,6 @@
 import importlib
 import logging
+import os
 import sys
 import types
 from contextlib import contextmanager
@@ -51,6 +52,7 @@ def _temporary_backend_stubs():
     db_connection_module = types.ModuleType("static.backend.db_connection")
     db_connection_module.insert_new_user = lambda *args, **kwargs: None
     db_connection_module.fetch_user = lambda *args, **kwargs: None
+    db_connection_module.update_user_password_hash = lambda *args, **kwargs: None
     db_connection_module.fetch_user_instagram_credentials = lambda *args, **kwargs: None
     db_connection_module.fetch_distinct_comment_dimensions = (
         lambda *args, **kwargs: {"page_names": [], "page_ids": []}
@@ -84,6 +86,8 @@ def _temporary_backend_stubs():
 def load_app_module():
     if str(PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(PROJECT_ROOT))
+
+    os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret")
 
     previous_disable_level = logging.root.manager.disable
     logging.disable(logging.CRITICAL)

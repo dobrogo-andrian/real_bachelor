@@ -611,7 +611,9 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
         <script src="../static/assets/js/breakpoints.min.js"></script>
         <script src="../static/assets/js/util.js"></script>
         <script src="../static/assets/js/main.js"></script>
+        <script src="../static/backend/auth/session.js"></script>
         <script>
+            const session = window.CommentLabSession;
             const advancedQueryForm = document.getElementById('advanced-query-form');
             const resetFiltersButton = document.getElementById('reset-filters');
             const queryStatus = document.getElementById('query-status');
@@ -1364,13 +1366,18 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
                 advancedChartRoot.hidden = true;
 
                 try {
-                    const response = await fetch('/api/advanced-analysis/analyze', {
+                    const rawResponse = await session.fetchWithCsrf('/api/advanced-analysis/analyze', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(payload)
                     });
+
+                    const response = await session.ensureAuthenticatedResponse(rawResponse);
+                    if (!response) {
+                        return;
+                    }
 
                     const data = await response.json();
                     if (!response.ok) {
@@ -1462,13 +1469,18 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
                 }
 
                 try {
-                    const response = await fetch('/api/advanced-analysis/preview', {
+                    const rawResponse = await session.fetchWithCsrf('/api/advanced-analysis/preview', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(payload)
                     });
+
+                    const response = await session.ensureAuthenticatedResponse(rawResponse);
+                    if (!response) {
+                        return;
+                    }
 
                     const data = await response.json();
                     if (!response.ok) {

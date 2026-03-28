@@ -4,6 +4,12 @@ from tests.support.app_test_case import AppTestCase, app_module
 
 
 class AppSmokeTests(AppTestCase):
+    def test_static_assets_are_publicly_served(self):
+        response = self.client.get("/static/assets/css/main.css")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"body", response.data)
+
     def test_app_imports_and_public_pages_render(self):
         self.assertIsNotNone(self.app)
 

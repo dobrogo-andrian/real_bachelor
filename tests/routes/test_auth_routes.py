@@ -1,16 +1,16 @@
-import hashlib
 from datetime import timedelta
 from unittest.mock import patch
 
 from flask import jsonify
 from flask_jwt_extended import create_access_token
+from werkzeug.security import generate_password_hash
 
 from tests.support.app_test_case import AppTestCase, app_module
 
 
 class AuthRouteTests(AppTestCase):
     def test_login_route(self):
-        password_hash = hashlib.sha256("secret".encode()).hexdigest()
+        password_hash = generate_password_hash("secret", method="scrypt")
         scenarios = [
             {
                 "name": "get_login_page_resets_session",
@@ -39,6 +39,15 @@ class AuthRouteTests(AppTestCase):
                 ),
             },
             {
+                "name": "post_login_upgrades_legacy_sha256_hash",
+                "method": "POST",
+                "path": "/login",
+                "fetch_user_result": (app_module.hashlib.sha256("secret".encode()).hexdigest(),),
+                "payload": {"username": "alice", "password": "secret"},
+                "expected_status": 200,
+                "assertions": lambda response: self.assertEqual(response.get_json()["message"], "Login successful"),
+            },
+            {
                 "name": "post_login_rejects_bad_password",
                 "method": "POST",
                 "path": "/login",
@@ -65,7 +74,7 @@ class AuthRouteTests(AppTestCase):
         for scenario in scenarios:
             with self.subTest(scenario["name"]), patch.object(
                 app_module, "fetch_user", return_value=scenario["fetch_user_result"]
-            ):
+            ), patch.object(app_module, "update_user_password_hash") as mocked_upgrade:
                 if scenario["method"] == "GET":
                     response = self.client.get(scenario["path"])
                 else:
@@ -73,6 +82,11 @@ class AuthRouteTests(AppTestCase):
 
                 self.assertEqual(response.status_code, scenario["expected_status"])
                 scenario["assertions"](response)
+                if scenario["name"] == "post_login_upgrades_legacy_sha256_hash":
+                    mocked_upgrade.assert_called_once()
+                    self.assertTrue(mocked_upgrade.call_args.args[1].startswith("scrypt:"))
+                else:
+                    mocked_upgrade.assert_not_called()
 
     def test_refresh_route(self):
         scenarios = [
@@ -99,15 +113,34 @@ class AuthRouteTests(AppTestCase):
             with self.subTest(scenario["name"]):
                 self.client = self.app.test_client()
                 scenario["prepare"]()
-                response = self.client.post("/refresh", headers={"Accept": "application/json"})
+                response = self.client.post("/refresh", headers=self.make_json_headers(csrf="refresh"))
                 self.assertEqual(response.status_code, scenario["expected_status"])
                 scenario["assertions"](response)
 
+    def test_refresh_route_rejects_missing_csrf_header(self):
+        self.set_refresh_cookie("alice")
+
+        response = self.client.post("/refresh", headers={"Accept": "application/json"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "Missing CSRF token")
+        self.assertEqual(response.get_json()["action"], "logout")
+
     def test_logout_route(self):
-        response = self.client.post("/logout")
+        self.set_access_cookie("alice")
+        response = self.client.post("/logout", headers=self.make_json_headers(csrf="access"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["message"], "Logout successful")
         self.assertIn("access_token_cookie=;", " ".join(response.headers.getlist("Set-Cookie")))
+
+    def test_logout_route_rejects_missing_csrf_header(self):
+        self.set_access_cookie("alice")
+
+        response = self.client.post("/logout", headers={"Accept": "application/json"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "Missing CSRF token")
+        self.assertEqual(response.get_json()["action"], "logout")
 
     def test_user_info_route(self):
         scenarios = [
@@ -152,14 +185,8 @@ class AuthRouteTests(AppTestCase):
         expired_client.set_cookie("access_token_cookie", expired_token, path="/")
         scenarios.append(("expired_token_returns_refresh_action", expired_client, None, "/user-info", {"Accept": "application/json"}, 401, "refresh"))
 
-        static_anon_client = self.app.test_client()
-        scenarios.append(("static_proxy_requires_auth", static_anon_client, None, "/static/assets/js/main.js", {"Accept": "application/json"}, 401, "redirect_to_login"))
-
-        static_auth_client = self.app.test_client()
-        with self.app.app_context():
-            access_token = create_access_token(identity="alice")
-        static_auth_client.set_cookie("access_token_cookie", access_token, path="/")
-        scenarios.append(("static_proxy_serves_when_authenticated", static_auth_client, "served", "/static/assets/js/main.js", {}, 200, "served"))
+        static_client = self.app.test_client()
+        scenarios.append(("static_proxy_is_public", static_client, "served", "/static/assets/js/main.js", {}, 200, "served"))
 
         for name, client, send_result, path, headers, expected_status, expected_marker in scenarios:
             with self.subTest(name):
@@ -218,15 +245,13 @@ class AuthRouteTests(AppTestCase):
                 "assertions": lambda response: (
                     self.assertEqual(response.get_json()["message"], "created"),
                     self.assertEqual(
-                        captured["call"],
-                        (
-                            "alice",
-                            "a@example.com",
-                            hashlib.sha256("secret".encode()).hexdigest(),
-                            "insta",
-                            "insta-secret",
-                        ),
+                        captured["call"][0],
+                        "alice",
                     ),
+                    self.assertEqual(captured["call"][1], "a@example.com"),
+                    self.assertTrue(captured["call"][2].startswith("scrypt:")),
+                    self.assertEqual(captured["call"][3], "insta"),
+                    self.assertEqual(captured["call"][4], "insta-secret"),
                 ),
             },
         ]

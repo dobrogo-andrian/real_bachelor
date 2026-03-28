@@ -1,22 +1,6 @@
 const loginForm = document.getElementById('login-form');
 const nextUrl = new URLSearchParams(window.location.search).get('next') || '/'; // Get 'next' from query params
-
-// Helper function to check if a specific cookie exists
-function getCookie(name) {
-const cookies = document.cookie.split('; ');
-for (let cookie of cookies) {
-  const [key, value] = cookie.split('=');
-  if (key === name) {
-    return value;
-  }
-}
-return null;
-}
-
-// Helper function to delete a specific cookie
-function deleteCookie(name) {
-document.cookie = `${name}=; Path=/; Max-Age=0; HttpOnly; Secure`;
-}
+const session = window.CommentLabSession;
 
 // Handle token-related errors globally
 // Handle token-related errors globally
@@ -24,18 +8,20 @@ async function handleTokenError(action) {
 switch (action) {
   case 'logout':
     // Delete cookies and redirect to login
-    deleteCookie('access_token');
-    deleteCookie('refresh_token');
+    session.clearSessionCookies();
     window.location.href = '/login';
     break;
 
   case 'refresh':
     // Attempt to refresh the token
     try {
-      const refreshResponse = await fetch('/refresh', {
-        method: 'POST',
-        credentials: 'include', // Include cookies in the request
-      });
+      const refreshResponse = await session.fetchWithCsrf(
+        '/refresh',
+        {
+          method: 'POST',
+        },
+        { refresh: true }
+      );
 
       if (refreshResponse.ok) {
         console.log('Token refreshed successfully');
@@ -67,7 +53,7 @@ switch (action) {
 // Check token errors on page load
 // Check token errors on page load
 async function checkTokenOnPageLoad() {
-const accessToken = getCookie('access_token');
+const hasAccessSession = session.hasAccessSession();
 
 // Helper function to simulate sleep/delay
 function sleep(ms) {
@@ -76,7 +62,7 @@ return new Promise(resolve => setTimeout(resolve, ms));
 
 console.log('Checking token on page load...');
 
-if (accessToken) {
+if (hasAccessSession) {
 try {
   // Make a test request to validate the token
   const response = await fetch('/user-info', {

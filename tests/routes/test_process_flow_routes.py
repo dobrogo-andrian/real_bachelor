@@ -71,11 +71,81 @@ class ProcessFlowRouteTests(AppTestCase):
                     response = self.client.post(
                         "/process-data",
                         json=scenario["payload"],
-                        headers={"Accept": "application/json"},
+                        headers=self.make_json_headers(csrf="access"),
                     )
 
                 self.assertEqual(response.status_code, scenario["expected_status"])
                 scenario["assertions"](response, mocked_load)
+
+    def test_process_data_endpoint_validates_request_payload(self):
+        scenarios = [
+            {
+                "name": "missing_params_object",
+                "payload": {},
+                "expected_error": "No parameters provided.",
+            },
+            {
+                "name": "blank_target_page",
+                "payload": {"params": {"param1": "   ", "param2": "3"}},
+                "expected_error": "Target page is required.",
+            },
+            {
+                "name": "missing_number_of_posts",
+                "payload": {"params": {"param1": "arthaslav"}},
+                "expected_error": "Number of posts is required.",
+            },
+            {
+                "name": "non_integer_number_of_posts",
+                "payload": {"params": {"param1": "arthaslav", "param2": "abc"}},
+                "expected_error": "Number of posts must be an integer.",
+            },
+            {
+                "name": "non_positive_number_of_posts",
+                "payload": {"params": {"param1": "arthaslav", "param2": "0"}},
+                "expected_error": "Number of posts must be greater than zero.",
+            },
+        ]
+
+        for scenario in scenarios:
+            with self.subTest(scenario["name"]):
+                self.client = self.app.test_client()
+                self.set_access_cookie("alice")
+                with patch.object(
+                    app_module,
+                    "fetch_user_instagram_credentials",
+                    return_value={"instagram_login": "insta", "instagram_password": "secret"},
+                ) as mocked_credentials, patch.object(
+                    app_module, "fetch_existing_post_hrefs"
+                ) as mocked_existing, patch.object(
+                    app_module, "extract_data"
+                ) as mocked_extract, patch.object(
+                    app_module, "load_to_db"
+                ) as mocked_load:
+                    response = self.client.post(
+                        "/process-data",
+                        json=scenario["payload"],
+                        headers=self.make_json_headers(csrf="access"),
+                    )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], scenario["expected_error"])
+                mocked_credentials.assert_not_called()
+                mocked_existing.assert_not_called()
+                mocked_extract.assert_not_called()
+                mocked_load.assert_not_called()
+
+    def test_process_data_requires_csrf_header(self):
+        self.set_access_cookie("alice")
+
+        response = self.client.post(
+            "/process-data",
+            json={"params": {"param1": "arthaslav", "param2": "3"}},
+            headers={"Accept": "application/json"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "Missing CSRF token")
+        self.assertEqual(response.get_json()["action"], "logout")
 
     def test_enrich_comments_endpoint(self):
         scenarios = [
@@ -107,7 +177,7 @@ class ProcessFlowRouteTests(AppTestCase):
                         response = self.client.post(
                             "/enrich-comments",
                             json={"mode": "page_name", "page_name": "arthaslav"},
-                            headers={"Accept": "application/json"},
+                            headers=self.make_json_headers(csrf="access"),
                         )
                         mocked_enrich.assert_called_once()
                 else:
@@ -115,7 +185,7 @@ class ProcessFlowRouteTests(AppTestCase):
                         response = self.client.post(
                             "/enrich-comments",
                             json={"mode": "page_name", "page_name": "arthaslav"},
-                            headers={"Accept": "application/json"},
+                            headers=self.make_json_headers(csrf="access"),
                         )
 
                 self.assertEqual(response.status_code, scenario["expected_status"])
@@ -155,7 +225,7 @@ class ProcessFlowRouteTests(AppTestCase):
                         response = self.client.post(
                             "/page-analysis",
                             json={"selection_type": "page_id", "selection_value": "arthaslav"},
-                            headers={"Accept": "application/json"},
+                            headers=self.make_json_headers(csrf="access"),
                         )
                         mocked_analysis.assert_called_once()
                 else:
@@ -163,7 +233,7 @@ class ProcessFlowRouteTests(AppTestCase):
                         response = self.client.post(
                             "/page-analysis",
                             json={"selection_type": "page_id", "selection_value": "arthaslav"},
-                            headers={"Accept": "application/json"},
+                            headers=self.make_json_headers(csrf="access"),
                         )
 
                 self.assertEqual(response.status_code, scenario["expected_status"])
@@ -213,7 +283,7 @@ class ProcessFlowRouteTests(AppTestCase):
                         response = self.client.post(
                             "/api/advanced-analysis/preview",
                             json={"page_ids": ["arthaslav"]},
-                            headers={"Accept": "application/json"},
+                            headers=self.make_json_headers(csrf="access"),
                         )
                         mocked_preview.assert_called_once()
                 else:
@@ -221,7 +291,7 @@ class ProcessFlowRouteTests(AppTestCase):
                         response = self.client.post(
                             "/api/advanced-analysis/preview",
                             json={"page_ids": ["arthaslav"]},
-                            headers={"Accept": "application/json"},
+                            headers=self.make_json_headers(csrf="access"),
                         )
 
                 self.assertEqual(response.status_code, scenario["expected_status"])
@@ -268,7 +338,7 @@ class ProcessFlowRouteTests(AppTestCase):
                         response = self.client.post(
                             "/api/advanced-analysis/analyze",
                             json={"page_ids": ["arthaslav"]},
-                            headers={"Accept": "application/json"},
+                            headers=self.make_json_headers(csrf="access"),
                         )
                         mocked_rows.assert_called_once()
                 else:
@@ -276,7 +346,7 @@ class ProcessFlowRouteTests(AppTestCase):
                         response = self.client.post(
                             "/api/advanced-analysis/analyze",
                             json={"page_ids": ["arthaslav"]},
-                            headers={"Accept": "application/json"},
+                            headers=self.make_json_headers(csrf="access"),
                         )
 
                 self.assertEqual(response.status_code, scenario["expected_status"])

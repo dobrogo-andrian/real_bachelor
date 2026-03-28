@@ -1,7 +1,13 @@
 import ctypes
+import os
 import pyodbc
 from flask import jsonify
 from ctypes import wintypes
+
+from env_config import load_dotenv
+
+
+load_dotenv()
 
 
 CRYPTPROTECT_UI_FORBIDDEN = 0x01
@@ -147,14 +153,23 @@ def _add_first_comment_sentiment_filter(where_clauses, params, values, table_ali
 
 
 def get_db_connection():
-    conn = pyodbc.connect(
-        'DRIVER={ODBC Driver 17 for SQL Server};'
-        'SERVER=localhost;'
-        'DATABASE=social-media-optimizer;'
-        'UID=social-media-optimizer;'
-        'PWD=social-media-optimizer'
-    )
+    conn = pyodbc.connect(_build_connection_string())
     return conn
+
+
+def _build_connection_string():
+    driver = os.getenv("DB_DRIVER", "ODBC Driver 17 for SQL Server")
+    server = os.environ["DB_SERVER"]
+    database = os.environ["DB_NAME"]
+    username = os.environ["DB_USER"]
+    password = os.environ["DB_PASSWORD"]
+    return (
+        f"DRIVER={{{driver}}};"
+        f"SERVER={server};"
+        f"DATABASE={database};"
+        f"UID={username};"
+        f"PWD={password}"
+    )
 
 
 def _bytes_to_blob(value):
@@ -251,8 +266,30 @@ def insert_new_user(username, email, password, instagram_login, instagram_passwo
 def fetch_user(username):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT PasswordHash FROM Users WHERE Username = ?', (username,))
-    return cursor.fetchone()
+    try:
+        cursor.execute('SELECT PasswordHash FROM Users WHERE Username = ?', (username,))
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def update_user_password_hash(username, password_hash):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            '''
+            UPDATE Users
+            SET PasswordHash = ?, PasswordChangedAt = SYSUTCDATETIME()
+            WHERE Username = ?
+            ''',
+            (password_hash, username),
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
 
 
 def fetch_user_instagram_credentials(username):

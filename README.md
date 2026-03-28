@@ -6,6 +6,7 @@
 
 - Authenticates users with JWT cookies.
 - Stores application users and encrypted Instagram credentials in SQL Server.
+- Stores application passwords as adaptive `scrypt` hashes and upgrades legacy SHA-256 hashes on successful login.
 - Runs an Instagram extraction workflow with Selenium and ChromeDriver.
 - Loads scraped CSV files into a `Comments` table.
 - Builds an `EnrichedComments` layer with language detection and sentiment scoring.
@@ -83,12 +84,16 @@ External dependencies:
 pip install -r requirements.txt
 ```
 
-3. Create the SQL Server database and tables from:
+3. Create a local `.env` file.
+   - `.env.example` lists the required variables.
+   - `.env` is loaded automatically on app startup.
+   - Set at least `JWT_SECRET_KEY`, `DB_SERVER`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`.
+4. Create the SQL Server database and tables from:
    - `ddl/Users.sql`
    - `ddl/Comments.sql`
    - `ddl/EnrichedComments.sql`
-4. Update database connection settings in `static/backend/db_connection.py` if your local SQL Server setup differs.
-5. Update the ChromeDriver path in `static/backend/extract_data.py` if it is not installed in the hardcoded location.
+   - For an existing database, apply `ddl/migrations/001_harden_users_password_storage.sql`.
+5. Update `CHROMEDRIVER_PATH` in `.env` if ChromeDriver is not on your PATH.
 6. Start the Flask app:
 
 ```bash
@@ -112,10 +117,7 @@ The app runs on `http://localhost:5000`.
 
 ## Current caveats
 
-- `app.py` still uses a hardcoded `JWT_SECRET_KEY`.
-- `JWT_COOKIE_CSRF_PROTECT` is disabled.
-- `static/backend/db_connection.py` contains hardcoded SQL Server credentials.
-- `static/backend/extract_data.py` still contains hardcoded Instagram credentials inside its `__main__` block.
+- `static/backend/extract_data.py` uses optional `.env` variables for its standalone `__main__` entrypoint.
 - Generated directories such as `__pycache__/` and `unprocessed_data/` are currently present in the repository worktree.
 
 ## License
