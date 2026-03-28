@@ -15,6 +15,7 @@ This document reflects the current repository layout and the responsibilities of
 
 ```text
 real_bachelor/
+|-- .idea/
 |-- app.py
 |-- README.md
 |-- PROJECT_STRUCTURE.md
@@ -47,7 +48,6 @@ real_bachelor/
 |       |   |-- home.js
 |       |   |-- login.js
 |       |   `-- signup.js
-|       |-- old_apprach/
 |       `-- __pycache__/
 |-- templates/
 |   |-- advanced_analysis.html
@@ -61,7 +61,10 @@ real_bachelor/
 |   `-- test.html
 |-- unprocessed_data/
 |   `-- comments1/
-|       `-- lpnu_official_1.csv
+|       |-- arthaslav_1.csv
+|       |-- arthaslav_2.csv
+|       |-- ...
+|       `-- arthaslav_50.csv
 `-- __pycache__/
 ```
 
@@ -255,7 +258,7 @@ It also includes:
 ### `unprocessed_data/`
 
 - stores raw CSV files produced by the scraper
-- current sample content: `comments1/lpnu_official_1.csv`
+- current sample content: `comments1/arthaslav_1.csv` through `comments1/arthaslav_50.csv`
 
 ### `cookie/`
 
@@ -268,6 +271,6 @@ It also includes:
 
 ## Current project state notes
 
-- `static/backend/old_apprach/` exists but is currently empty.
+- The repository also contains IDE metadata under `.idea/`.
 - The repository worktree includes generated files such as `__pycache__/` and extraction output.
 - Authentication and database configuration are functional for local development but still rely on hardcoded secrets/settings in source files.
