@@ -28,7 +28,7 @@ from flask_jwt_extended import (
     unset_jwt_cookies
 )
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
 app.config['JWT_SECRET_KEY'] = 'your-secret-key'
 app.config['JWT_TOKEN_LOCATION'] = ['cookies']
 app.config['JWT_COOKIE_SECURE'] = False

@@ -55,6 +55,8 @@ def _normalize_filter_values(value):
         raw_values = [value]
     normalized = []
     for item in raw_values:
+        if item is None:
+            continue
         text = str(item).strip()
         if text:
             normalized.append(text)
