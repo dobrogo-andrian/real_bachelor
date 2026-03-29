@@ -2,9 +2,8 @@ import os
 import shutil
 import time
 import random
-import pickle
+import json
 import pandas as pd
-from fake_useragent import UserAgent
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -14,13 +13,27 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
 from static.backend.common_utils import get_next_filename
-from static.backend.db_connection import fetch_user_instagram_credentials
+from static.backend.db_connection import (
+    clear_user_instagram_cookies,
+    fetch_user_instagram_credentials,
+    fetch_user_instagram_cookies,
+    store_user_instagram_cookies,
+)
 
 
 POST_CONTAINER_XPATH = (
     "//div[@style[contains(., 'display: flex') and contains(., 'flex-direction: column') "
     "and contains(., 'position: relative')]]"
 )
+
+ACCOUNT_RESTRICTION_PATTERNS = [
+    "ми маємо підозру",
+    "автоматичні дії",
+    "automated actions",
+    "temporarily restricted",
+    "temporarily limited",
+    "secure your account",
+]
 
 
 def human_pause(min_seconds=0.2, max_seconds=0.6):
@@ -119,11 +132,8 @@ def delete_previos_files():
                 print(f"Error deleting directory {file_path}: {e}")
 
 
-def setup_driver(user_agent):
+def setup_driver(headless=False):
     options = Options()
-    options.add_argument(f"user-agent={user_agent.random}")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--disable-infobars")
     options.add_argument("--disable-notifications")
     options.add_argument("--lang=en")
     options.add_argument("--start-maximized")
@@ -136,21 +146,15 @@ def setup_driver(user_agent):
     options.add_argument("--disable-logging")
     options.add_argument("--log-level=3")
     options.add_experimental_option("excludeSwitches", ["enable-logging"])
-    # options.add_argument("--headless")
+    if headless:
+        options.add_argument("--headless=new")
+        options.add_argument("--window-size=1440,2000")
 
     driver_path = os.getenv("CHROMEDRIVER_PATH")
     if driver_path:
         driver = webdriver.Chrome(service=Service(driver_path), options=options)
     else:
         driver = webdriver.Chrome(options=options)
-
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            Object.defineProperty(navigator, 'webdriver', {
-              get: () => undefined
-            })
-        """
-    })
     return driver
 
 
@@ -274,54 +278,146 @@ def login_to_instagram(driver, username, password):
         return False
 
 
-def save_cookies(driver, filename="cookie/cookies.pkl"):
-    """
-     cookies  .
-    """
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
-    with open(filename, "wb") as file:
-        pickle.dump(driver.get_cookies(), file)
+def detect_instagram_restriction(driver):
+    current_url = str(getattr(driver, "current_url", "") or "").lower()
+    if "/challenge/" in current_url or "checkpoint" in current_url:
+        return "Instagram requested an account challenge or checkpoint review."
+
+    page_text = " ".join(
+        [
+            str(getattr(driver, "title", "") or ""),
+            str(getattr(driver, "page_source", "") or ""),
+        ]
+    ).lower()
+    for pattern in ACCOUNT_RESTRICTION_PATTERNS:
+        if pattern in page_text:
+            return "Instagram flagged the session for suspected automation."
+    return None
+
+
+def wait_for_manual_instagram_login(driver, timeout=180, poll_interval=2):
+    print(
+        "[WARN] Stored cookies were unavailable. "
+        "Manual Instagram login is required in the opened browser window."
+    )
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        restriction_reason = detect_instagram_restriction(driver)
+        if restriction_reason:
+            print(f"[WARN] {restriction_reason}")
+            return False, restriction_reason
+
+        current_url = str(getattr(driver, "current_url", "") or "").lower()
+        if "accounts/login" not in current_url and "verificationcode" not in current_url:
+            try:
+                wait_for_profile_content(driver, timeout=5)
+            except Exception:
+                pass
+            return True, None
+
+        time.sleep(poll_interval)
+
+    return False, "Manual Instagram login timed out before the session became authenticated."
+
+
+ALLOWED_COOKIE_FIELDS = {
+    "domain",
+    "expiry",
+    "httpOnly",
+    "name",
+    "path",
+    "sameSite",
+    "secure",
+    "value",
+}
+
+
+def _normalize_cookie_for_storage(cookie):
+    if not isinstance(cookie, dict):
+        raise ValueError("Cookie entry must be a dictionary.")
+
+    normalized = {}
+    for key in ALLOWED_COOKIE_FIELDS:
+        if key not in cookie:
+            continue
+        value = cookie[key]
+        if key in {"name", "value"}:
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"Cookie field '{key}' must be a non-empty string.")
+        elif key in {"domain", "path", "sameSite"}:
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise ValueError(f"Cookie field '{key}' must be a string.")
+        elif key == "expiry":
+            if value is None:
+                continue
+            value = int(value)
+        elif key in {"secure", "httpOnly"}:
+            value = bool(value)
+        normalized[key] = value
+
+    if "name" not in normalized or "value" not in normalized:
+        raise ValueError("Cookie entry must include non-empty 'name' and 'value' fields.")
+    return normalized
+
+
+def _serialize_cookie_payload(app_username, instagram_username, cookies):
+    normalized_cookies = [_normalize_cookie_for_storage(cookie) for cookie in cookies]
+    payload = {
+        "version": 1,
+        "app_username": app_username,
+        "instagram_username": instagram_username,
+        "cookies": normalized_cookies,
+    }
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def _deserialize_cookie_payload(payload, app_username, instagram_username):
+    document = json.loads(payload)
+    if not isinstance(document, dict):
+        raise ValueError("Cookie payload must be a JSON object.")
+    if document.get("version") != 1:
+        raise ValueError("Unsupported cookie payload version.")
+    if document.get("app_username") != app_username:
+        raise ValueError("Cookie payload does not belong to this application user.")
+    if document.get("instagram_username") != instagram_username:
+        raise ValueError("Cookie payload does not belong to this Instagram account.")
+
+    cookies = document.get("cookies")
+    if not isinstance(cookies, list) or not cookies:
+        raise ValueError("Cookie payload does not contain any cookies.")
+    return [_normalize_cookie_for_storage(cookie) for cookie in cookies]
+
+
+def save_cookies(driver, app_username, instagram_username):
+    payload = _serialize_cookie_payload(app_username, instagram_username, driver.get_cookies())
+    store_user_instagram_cookies(app_username, payload)
     print("[INFO] Cookies saved.")
 
 
-def load_cookies(driver, filename=r"cookie/cookies.pkl"):
-    """
-     cookies  .
-    """
+def load_cookies(driver, app_username, instagram_username):
     try:
-        if not os.path.exists(filename):
-            print("[INFO] Cookies file not found. Proceeding with fresh login.")
+        payload = fetch_user_instagram_cookies(app_username)
+        if not payload:
+            print("[INFO] No stored cookies found for this user. Proceeding with fresh login.")
             return False
 
-        if os.path.getsize(filename) == 0:
-            print("[INFO] Cookies file is empty. Proceeding with fresh login.")
-            return False
-
-        with open(filename, "rb") as file:
-            cookies = pickle.load(file)
-
-        if not cookies:
-            print("[INFO] Cookies file has no data. Proceeding with fresh login.")
-            return False
-
+        cookies = _deserialize_cookie_payload(payload, app_username, instagram_username)
         for cookie in cookies:
             try:
                 driver.add_cookie(cookie)
             except Exception as e:
                 print(f"[WARN] Failed to add cookie {cookie}: {e}")
+                clear_user_instagram_cookies(app_username)
                 return False
 
         print("[INFO] Cookies loaded.")
         return True
-
-    except FileNotFoundError:
-        print("[INFO] Cookies file not found. Proceeding with fresh login.")
+    except (ValueError, TypeError, json.JSONDecodeError) as e:
+        print(f"[WARN] Stored cookies are invalid. Proceeding with fresh login. Reason: {e}")
+        clear_user_instagram_cookies(app_username)
         return False
-
-    except pickle.UnpicklingError:
-        print("[WARN] Cookies file is invalid or corrupted. Proceeding with fresh login.")
-        return False
-
     except Exception as e:
         print(f"[ERROR] Cookies error: {e}")
         return False
@@ -829,9 +925,16 @@ def load_all_posts(driver, target_page, number_of_posts, existing_post_hrefs=Non
     return hrefs, page_name
 
 
-def extract_data(USERNAME, PASSWORD, target_page, number_of_posts, existing_post_hrefs=None):
+def extract_data(
+    USERNAME,
+    PASSWORD,
+    target_page,
+    number_of_posts,
+    existing_post_hrefs=None,
+    app_username=None,
+    headless_session_only=False,
+):
     delete_previos_files()
-    user_agent = UserAgent()
     log = ""
     posts_requested = int(number_of_posts)
     new_posts_found = 0
@@ -839,7 +942,7 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts, existing_post
     collected_comment_rows = 0
     saved_files = []
     existing_post_hrefs = set(existing_post_hrefs or [])
-    driver = setup_driver(user_agent)
+    driver = setup_driver(headless=headless_session_only)
     human_pause(0.4, 0.9)
     driver.refresh()
     wait_for_document_ready(driver, timeout=10)
@@ -851,15 +954,60 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts, existing_post
         driver.get("https://www.instagram.com/")
         wait_for_document_ready(driver, timeout=12)
         human_pause(0.4, 0.9)
+        restriction_reason = detect_instagram_restriction(driver)
+        if restriction_reason:
+            log += f"[WARN] {restriction_reason}\n"
+            return {
+                "log": log,
+                "target_page": target_page,
+                "posts_requested": posts_requested,
+                "new_posts_found": 0,
+                "posts_loaded": 0,
+                "comments_collected": 0,
+                "saved_files": [],
+                "aborted_reason": restriction_reason,
+            }
         print("[INFO] Loading cookies...\n")
         log += "[INFO] Loading cookies...\n"  # Add log message
-        load_cookie_success = load_cookies(driver)
+        if not app_username:
+            raise ValueError("Application username is required for per-user Instagram cookie storage.")
+        load_cookie_success = load_cookies(driver, app_username, USERNAME)
         if load_cookie_success:
+            driver.refresh()
+            wait_for_document_ready(driver, timeout=12)
+            human_pause(0.6, 1.3)
+            restriction_reason = detect_instagram_restriction(driver)
+            if restriction_reason:
+                clear_user_instagram_cookies(app_username)
+                log += f"[WARN] {restriction_reason}\n"
+                return {
+                    "log": log,
+                    "target_page": target_page,
+                    "posts_requested": posts_requested,
+                    "new_posts_found": 0,
+                    "posts_loaded": 0,
+                    "comments_collected": 0,
+                    "saved_files": [],
+                    "aborted_reason": restriction_reason,
+                }
             print("[INFO] Cookies loaded successfully.\n")
             log += "[INFO] Cookies loaded successfully.\n"  # Add success log
         else:
-            print("[INFO] No valid cookies. Logging in.\n")
-            log += "[INFO] No valid cookies. Logging in.\n"  # Add failure log
+            print("[INFO] No valid cookies. Waiting for manual login.\n")
+            log += "[INFO] No valid cookies. Waiting for manual login.\n"  # Add failure log
+            if headless_session_only:
+                reason = "Headless extraction requires a valid stored Instagram session for this app user."
+                log += f"[WARN] {reason}\n"
+                return {
+                    "log": log,
+                    "target_page": target_page,
+                    "posts_requested": posts_requested,
+                    "new_posts_found": 0,
+                    "posts_loaded": 0,
+                    "comments_collected": 0,
+                    "saved_files": [],
+                    "aborted_reason": reason,
+                }
         print("[INFO] Starting data collection...\n")
         log += "[INFO] Starting data collection...\n"  # Add log message
         if existing_post_hrefs:
@@ -883,9 +1031,15 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts, existing_post
                     print(f"[WARN] Skipping post after retries failed: {i}. Reason: {e}")
                     log += f"[WARN] Skipping post after retries failed: {i}. Reason: {e}\n"
         else:
-            login_success = login_to_instagram(driver, USERNAME, PASSWORD)
+            driver.get("https://www.instagram.com/accounts/login/")
+            wait_for_document_ready(driver, timeout=12)
+            login_timeout = int(os.getenv("INSTAGRAM_MANUAL_LOGIN_TIMEOUT_SECONDS", "180"))
+            login_success, login_failure_reason = wait_for_manual_instagram_login(
+                driver,
+                timeout=login_timeout,
+            )
             if login_success:
-                save_cookies(driver)
+                save_cookies(driver, app_username, USERNAME)
                 posts, page_name = load_all_posts(
                     driver,
                     target_page,
@@ -903,8 +1057,19 @@ def extract_data(USERNAME, PASSWORD, target_page, number_of_posts, existing_post
                         print(f"[WARN] Skipping post after retries failed: {i}. Reason: {e}")
                         log += f"[WARN] Skipping post after retries failed: {i}. Reason: {e}\n"
             else:
-                print(f"[WARN] Login failed: still at {driver.current_url}\n")
-                log += f"[WARN] Login failed: still at {driver.current_url}\n"  # Add failure log
+                failure_reason = login_failure_reason or f"Login failed: still at {driver.current_url}"
+                print(f"[WARN] {failure_reason}\n")
+                log += f"[WARN] {failure_reason}\n"
+                return {
+                    "log": log,
+                    "target_page": target_page,
+                    "posts_requested": posts_requested,
+                    "new_posts_found": 0,
+                    "posts_loaded": 0,
+                    "comments_collected": 0,
+                    "saved_files": [],
+                    "aborted_reason": failure_reason,
+                }
         print("[INFO] Data collection finished.\n")
         log += "[INFO] Data collection finished.\n"  # Add success log
     except Exception as e:
@@ -942,4 +1107,4 @@ if __name__ == "__main__":
     if not instagram_username or not instagram_password:
         raise ValueError(f"Stored Instagram credentials are incomplete for user '{app_username}'.")
 
-    extract_data(instagram_username, instagram_password, target_page, int(number_of_posts))
+    extract_data(instagram_username, instagram_password, target_page, int(number_of_posts), app_username=app_username)

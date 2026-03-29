@@ -6,6 +6,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
         <link rel="stylesheet" href="../static/assets/css/main.css" />
         <link rel="stylesheet" href="../static/assets/css/landing-dashboard.css" />
+        <link rel="stylesheet" href="../static/assets/css/footer.css" />
         <noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
         <style>
             .analysis-shell {
@@ -191,13 +192,13 @@
             <nav id="menu">
                 <ul class="links">
                     <li><a href="/">Home</a></li>
+                    <li><a href="/extractor">Extractor</a></li>
                     <li><a href="/explorer">Explorer</a></li>
                     <li><a href="/advanced-analysis">Advanced Analysis</a></li>
-                    <li><a href="/extractor">Extractor</a></li>
                 </ul>
                 <ul class="actions stacked">
-                    <li><a href="/explorer" class="button primary fit">Open Explorer</a></li>
-                    <li><a href="/advanced-analysis" class="button fit">Advanced analysis</a></li>
+                    <li id="menu-primary-action"><a href="/signup" class="button primary fit">Sign Up</a></li>
+                    <li id="menu-secondary-action"><a href="/login" class="button fit">Log In</a></li>
                 </ul>
             </nav>
 
@@ -305,16 +306,23 @@
             </div>
 
             <footer id="footer">
-                <div class="inner">
-                    <ul class="icons">
-                        <li><a href="#" class="icon brands alt fa-instagram"><span class="label">Instagram</span></a></li>
-                        <li><a href="#" class="icon brands alt fa-github"><span class="label">GitHub</span></a></li>
-                    </ul>
-                    <ul class="copyright">
-                        <li>&copy; Comment Lab</li>
-                        <li>Explorer for analysis results and data exploration</li>
-                        <li><a href="/faq">FAQ</a></li>
-                        <li><a href="/elements">Elements</a></li>
+                <div class="inner footer-layout">
+                    <div class="footer-meta">
+                        <ul class="icons footer-nav">
+                            <li><a href="/extractor" class="icon solid alt fa-database"><span class="label">Extractor</span></a></li>
+                            <li><a href="/explorer" class="icon solid alt fa-chart-bar"><span class="label">Explorer</span></a></li>
+                            <li><a href="/advanced-analysis" class="icon solid alt fa-search"><span class="label">Advanced Analysis</span></a></li>
+                            <li><a href="/faq" class="icon solid alt fa-book"><span class="label">FAQ</span></a></li>
+                        </ul>
+                        <ul class="copyright">
+                            <li>&copy; Comment Lab</li>
+                            <li>Workspace for extraction, exploration, and analysis</li>
+                        </ul>
+                    </div>
+                    <ul class="icons footer-social">
+                        <li><a href="https://www.instagram.com/andrian_hyriak/" class="icon brands alt fa-instagram" target="_blank" rel="noopener noreferrer"><span class="label">Instagram</span></a></li>
+                        <li><a href="https://github.com/dobrogo-andrian" class="icon brands alt fa-github" target="_blank" rel="noopener noreferrer"><span class="label">GitHub</span></a></li>
+                        <li><a href="https://www.linkedin.com/in/andrian-data-scientist/" class="icon brands alt fa-linkedin-in" target="_blank" rel="noopener noreferrer"><span class="label">LinkedIn</span></a></li>
                     </ul>
                 </div>
             </footer>
@@ -328,6 +336,7 @@
         <script src="../static/assets/js/util.js"></script>
         <script src="../static/assets/js/main.js"></script>
         <script src="../static/backend/auth/session.js"></script>
+        <script src="../static/backend/auth/menu_auth.js"></script>
         <script>
             (function () {
                 const session = window.CommentLabSession;

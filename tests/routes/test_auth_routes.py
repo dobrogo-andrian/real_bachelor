@@ -157,7 +157,7 @@ class AuthRouteTests(AppTestCase):
                 "prepare": lambda: self.set_access_cookie("alice"),
                 "expected_status": 200,
                 "assertions": lambda response: self.assertEqual(
-                    response.get_json(), {"username": "alice", "email": "email@example.com"}
+                    response.get_json(), {"username": "alice", "email": "alice@example.com"}
                 ),
             },
         ]
@@ -166,9 +166,181 @@ class AuthRouteTests(AppTestCase):
             with self.subTest(scenario["name"]):
                 self.client = self.app.test_client()
                 scenario["prepare"]()
-                response = self.client.get("/user-info", headers={"Accept": "application/json"})
+                with patch.object(
+                    app_module,
+                    "fetch_user_profile",
+                    return_value={"email": "alice@example.com"},
+                ):
+                    response = self.client.get("/user-info", headers={"Accept": "application/json"})
                 self.assertEqual(response.status_code, scenario["expected_status"])
                 scenario["assertions"](response)
+
+    def test_account_routes(self):
+        self.set_access_cookie("alice")
+
+        profile_payload = {
+            "username": "alice",
+            "email": "alice@example.com",
+            "email_verified": False,
+            "email_verified_at": None,
+            "created_at": "2026-03-01T10:00:00",
+            "password_changed_at": "2026-03-10T10:00:00",
+            "instagram_login": "insta",
+            "has_instagram_password": True,
+            "instagram_cookies_updated_at": "2026-03-20T10:00:00",
+            "has_instagram_cookies": True,
+        }
+        stats_payload = {"total_comments": 10, "distinct_pages": 2, "enriched_comments": 7}
+
+        with patch.object(app_module, "fetch_user_profile", return_value=profile_payload), patch.object(
+            app_module, "fetch_account_statistics", return_value=stats_payload
+        ):
+            page_response = self.client.get("/account")
+            api_response = self.client.get("/api/account", headers=self.make_json_headers(csrf="access"))
+
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn(b"Account", page_response.data)
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(api_response.get_json()["profile"]["email"], "alice@example.com")
+        self.assertEqual(api_response.get_json()["stats"]["total_comments"], 10)
+
+    def test_manual_login_hint_route(self):
+        self.set_access_cookie("alice")
+
+        with patch.object(
+            app_module,
+            "fetch_user_instagram_credentials",
+            return_value={"instagram_login": "insta-user", "instagram_password": "secretpass"},
+        ):
+            response = self.client.get("/api/account/manual-login-hint", headers=self.make_json_headers(csrf="access"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {"instagram_login": "insta-user", "instagram_password_hint": "s********s"},
+        )
+
+    def test_account_mutation_routes(self):
+        self.set_access_cookie("alice")
+        scenarios = [
+            {
+                "name": "change_password_success",
+                "method": "POST",
+                "path": "/api/account/change-password",
+                "payload": {"current_password": "old-secret", "new_password": "new-secret-1"},
+                "verify_result": True,
+                "expected_status": 200,
+                "assertions": lambda response, mocked_password, mocked_email, mocked_ig, mocked_cookies: (
+                    self.assertEqual(response.get_json()["message"], "Password updated successfully."),
+                    mocked_password.assert_called_once(),
+                    mocked_email.assert_not_called(),
+                    mocked_ig.assert_not_called(),
+                    mocked_cookies.assert_not_called(),
+                ),
+            },
+            {
+                "name": "verify_email_success",
+                "method": "POST",
+                "path": "/api/account/verify-email",
+                "payload": {"current_password": "old-secret"},
+                "verify_result": True,
+                "expected_status": 200,
+                "assertions": lambda response, mocked_password, mocked_email, mocked_ig, mocked_cookies: (
+                    self.assertEqual(response.get_json()["message"], "Email marked as verified for this local account."),
+                    mocked_password.assert_not_called(),
+                    mocked_email.assert_called_once_with("alice", True),
+                    mocked_ig.assert_not_called(),
+                    mocked_cookies.assert_not_called(),
+                ),
+            },
+            {
+                "name": "clear_instagram_cookies",
+                "method": "POST",
+                "path": "/api/account/instagram-cookies/clear",
+                "payload": None,
+                "verify_result": True,
+                "expected_status": 200,
+                "assertions": lambda response, mocked_password, mocked_email, mocked_ig, mocked_cookies: (
+                    self.assertEqual(response.get_json()["message"], "Stored Instagram cookies cleared."),
+                    mocked_password.assert_not_called(),
+                    mocked_email.assert_not_called(),
+                    mocked_ig.assert_not_called(),
+                    mocked_cookies.assert_called_once_with("alice"),
+                ),
+            },
+            {
+                "name": "update_instagram_credentials",
+                "method": "POST",
+                "path": "/api/account/instagram-credentials",
+                "payload": {"instagram_login": "insta-new", "instagram_password": "ig-secret"},
+                "verify_result": True,
+                "expected_status": 200,
+                "assertions": lambda response, mocked_password, mocked_email, mocked_ig, mocked_cookies: (
+                    self.assertIn("Instagram credentials updated", response.get_json()["message"]),
+                    mocked_password.assert_not_called(),
+                    mocked_email.assert_not_called(),
+                    mocked_ig.assert_called_once_with("alice", "insta-new", "ig-secret"),
+                    mocked_cookies.assert_not_called(),
+                ),
+            },
+            {
+                "name": "delete_instagram_credentials",
+                "method": "DELETE",
+                "path": "/api/account/instagram-credentials",
+                "payload": None,
+                "verify_result": True,
+                "expected_status": 200,
+                "assertions": lambda response, mocked_password, mocked_email, mocked_ig, mocked_cookies: (
+                    self.assertIn("Instagram credentials deleted", response.get_json()["message"]),
+                    mocked_password.assert_not_called(),
+                    mocked_email.assert_not_called(),
+                    mocked_ig.assert_called_once_with("alice", None, None),
+                    mocked_cookies.assert_not_called(),
+                ),
+            },
+            {
+                "name": "change_password_rejects_wrong_current_password",
+                "method": "POST",
+                "path": "/api/account/change-password",
+                "payload": {"current_password": "wrong", "new_password": "new-secret-1"},
+                "verify_result": False,
+                "expected_status": 401,
+                "assertions": lambda response, mocked_password, mocked_email, mocked_ig, mocked_cookies: (
+                    self.assertEqual(response.get_json()["error"], "Current password is incorrect."),
+                    mocked_password.assert_not_called(),
+                    mocked_email.assert_not_called(),
+                    mocked_ig.assert_not_called(),
+                    mocked_cookies.assert_not_called(),
+                ),
+            },
+        ]
+
+        for scenario in scenarios:
+            with self.subTest(scenario["name"]), patch.object(
+                app_module, "verify_application_password", return_value=scenario["verify_result"]
+            ), patch.object(
+                app_module, "update_user_password_hash"
+            ) as mocked_password, patch.object(
+                app_module, "set_user_email_verified"
+            ) as mocked_email, patch.object(
+                app_module, "update_user_instagram_credentials"
+            ) as mocked_ig, patch.object(
+                app_module, "clear_user_instagram_cookies"
+            ) as mocked_cookies:
+                if scenario["method"] == "DELETE":
+                    response = self.client.delete(
+                        scenario["path"],
+                        headers=self.make_json_headers(csrf="access"),
+                    )
+                else:
+                    response = self.client.post(
+                        scenario["path"],
+                        json=scenario["payload"],
+                        headers=self.make_json_headers(csrf="access"),
+                    )
+
+                self.assertEqual(response.status_code, scenario["expected_status"])
+                scenario["assertions"](response, mocked_password, mocked_email, mocked_ig, mocked_cookies)
 
     def test_auth_error_handlers_and_static_proxy(self):
         scenarios = []

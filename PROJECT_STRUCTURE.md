@@ -9,7 +9,7 @@ This document reflects the current repository layout and the responsibilities of
 - `static/assets/` contains the base frontend theme and styling assets.
 - `static/backend/` contains the Python data pipeline plus some page-specific JavaScript.
 - `ddl/` contains SQL Server schema files.
-- `unprocessed_data/` and `cookie/` store generated runtime artifacts.
+- `unprocessed_data/` stores generated runtime artifacts.
 
 ## Top-level tree
 
@@ -22,11 +22,10 @@ real_bachelor/
 |-- TODO.md
 |-- LICENSE.txt
 |-- requirements.txt
-|-- cookie/
-|   `-- cookies.pkl
 |-- ddl/
 |   |-- Comments.sql
 |   |-- EnrichedComments.sql
+|   |-- Users_AddInstagramCookies.sql
 |   `-- Users.sql
 |-- static/
 |   |-- assets/
@@ -51,6 +50,7 @@ real_bachelor/
 |       `-- __pycache__/
 |-- templates/
 |   |-- advanced_analysis.html
+|   |-- account.html
 |   |-- elements.html
 |   |-- explorer.html
 |   |-- extractor.html
@@ -82,7 +82,7 @@ Responsibilities:
 Main route groups:
 
 - public pages: `/`, `/login`, `/signup`, `/test`
-- authenticated pages: `/extractor`, `/explorer`, `/advanced-analysis`, `/faq`, `/elements`
+- authenticated pages: `/extractor`, `/explorer`, `/advanced-analysis`, `/faq`, `/elements`, `/account`
 - data APIs:
   - `/process-data`
   - `/enrich-comments`
@@ -95,7 +95,7 @@ Main route groups:
 Responsibilities:
 
 - launches Selenium with a configured ChromeDriver
-- logs into Instagram
+- restores a stored Instagram session or waits for manual browser login
 - loads posts from a target page
 - opens comment sections, scrolls, and extracts comment text plus likes
 - writes CSV files for downstream loading
@@ -103,8 +103,9 @@ Responsibilities:
 Important details:
 
 - runtime output is written under `unprocessed_data/`
-- cookie persistence is stored in `cookie/cookies.pkl`
-- a manual `__main__` block still contains hardcoded Instagram credentials
+- per-user Instagram session cookies are stored in the `Users` table as encrypted, signed JSON payloads
+- extraction aborts when Instagram presents an account restriction or challenge page
+- the manual `__main__` block resolves Instagram credentials for the selected app user
 
 ### `static/backend/load_to_db.py`
 
@@ -158,9 +159,9 @@ Primary entry points:
 Responsibilities:
 
 - connects to SQL Server through `pyodbc`
-- encrypts and decrypts Instagram credentials with Windows DPAPI
+- encrypts and decrypts Instagram credentials and stored Instagram cookie payloads with Windows DPAPI
 - inserts users
-- fetches login and Instagram credential data
+- fetches login, Instagram credential, and Instagram cookie data
 - builds distinct filter dimensions for explorer pages
 - assembles filtered preview and analysis query results from `EnrichedComments`
 
@@ -179,6 +180,7 @@ Responsibilities:
 
 ### `templates/`
 
+- `account.html`: authenticated account management page
 - `index.html`: public landing page
 - `login.html`: authentication page
 - `signup.html`: user creation page
@@ -193,6 +195,7 @@ Responsibilities:
 
 These scripts support page-level frontend behavior such as:
 
+- account profile management
 - login handling
 - signup submission
 - landing page auth-aware behavior
@@ -222,6 +225,9 @@ Defines the `Users` table with:
 - `Email`
 - `InstagramLoginEncrypted`
 - `InstagramPasswordEncrypted`
+- `InstagramCookiesEncrypted`
+- `InstagramCookiesSignature`
+- `InstagramCookiesUpdatedAt`
 
 ### `ddl/Comments.sql`
 
@@ -259,10 +265,6 @@ It also includes:
 
 - stores raw CSV files produced by the scraper
 - current sample content: `comments1/arthaslav_1.csv` through `comments1/arthaslav_50.csv`
-
-### `cookie/`
-
-- stores Selenium cookie state in `cookies.pkl`
 
 ### `__pycache__/`
 

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Comment Lab | Account</title>
+  <link rel="stylesheet" href="../static/assets/css/main.css" />
+  <link rel="stylesheet" href="../static/assets/css/account.css" />
+  <link rel="stylesheet" href="../static/assets/css/footer.css" />
+  <noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
+</head>
+<body class="is-preload">
+  <div id="wrapper">
+    <header id="header">
+      <a href="/" class="logo"><strong>Comment Lab</strong> <span>account</span></a>
+      <nav>
+        <a href="#menu">Menu</a>
+      </nav>
+    </header>
+
+    <nav id="menu">
+      <ul class="links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/extractor">Extractor</a></li>
+        <li><a href="/explorer">Explorer</a></li>
+        <li><a href="/advanced-analysis">Advanced Analysis</a></li>
+      </ul>
+      <ul class="actions stacked">
+        <li id="menu-primary-action"><a href="/signup" class="button primary fit">Sign Up</a></li>
+        <li id="menu-secondary-action"><a href="/login" class="button fit">Log In</a></li>
+      </ul>
+    </nav>
+
+    <div id="main" class="alt">
+      <section id="one">
+        <div class="inner account-panel">
+          <header class="major">
+            <h1>Account</h1>
+            <p>Manage local account security, Instagram session state, and account metadata.</p>
+          </header>
+
+          <div id="account-status" class="account-status"></div>
+
+          <section class="account-hero">
+            <article class="account-card">
+              <h3>Profile</h3>
+              <div class="account-profile">
+                <div class="account-profile-row">
+                  <span class="account-profile-label">Username</span>
+                  <span class="account-profile-value" id="profile-username">{{ current_user }}</span>
+                </div>
+                <div class="account-profile-row">
+                  <span class="account-profile-label">Email</span>
+                  <span class="account-profile-value" id="profile-email">Loading...</span>
+                </div>
+                <div class="account-profile-row">
+                  <span class="account-profile-label">Email status</span>
+                  <span class="account-profile-value" id="profile-email-verified">Loading...</span>
+                </div>
+                <div class="account-profile-row">
+                  <span class="account-profile-label">Instagram login</span>
+                  <span class="account-profile-value" id="profile-instagram-login">Loading...</span>
+                </div>
+                <div class="account-profile-row">
+                  <span class="account-profile-label">Cookie state</span>
+                  <span class="account-profile-value" id="profile-cookie-state">Loading...</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="account-card">
+              <h3>Statistics</h3>
+              <div class="account-stats">
+                <div class="account-stat">
+                  <span>Total comments</span>
+                  <strong id="stat-total-comments">0</strong>
+                </div>
+                <div class="account-stat">
+                  <span>Distinct pages</span>
+                  <strong id="stat-distinct-pages">0</strong>
+                </div>
+                <div class="account-stat">
+                  <span>Enriched comments</span>
+                  <strong id="stat-enriched-comments">0</strong>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section class="account-grid" style="margin-top: 1.5rem;">
+            <article class="account-card account-card-form">
+              <h3>Change App Password</h3>
+              <form id="password-form" class="account-form">
+                <input type="password" id="current-password" placeholder="Current password" required />
+                <input type="password" id="new-password" placeholder="New password" required />
+                <button type="submit" class="button primary">Update password</button>
+              </form>
+            </article>
+
+            <article class="account-card account-card-form">
+              <h3>Email Verification</h3>
+              <p>
+                Current email: <strong id="verification-email-display">Loading...</strong><br />
+                Please confirm that this email is correct for your app account. No emails will be sent to this address;
+                this is only a local verification flag inside the application.
+              </p>
+              <form id="verify-email-form" class="account-form">
+                <input type="password" id="verify-email-password" placeholder="Current password" required />
+                <button type="submit" class="button">Mark email verified</button>
+              </form>
+            </article>
+
+            <article class="account-card account-card-form">
+              <h3>Instagram Credentials</h3>
+              <form id="instagram-form" class="account-form">
+                <input type="text" id="instagram-login" placeholder="Instagram login" required />
+                <input type="password" id="instagram-password" placeholder="New Instagram password" required />
+                <div class="account-actions">
+                  <button type="submit" class="button primary">Save credentials</button>
+                  <button type="button" id="delete-instagram-credentials" class="button">Delete credentials</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="account-card account-card-form">
+              <h3>Instagram Cookies</h3>
+              <p>Clear the stored Instagram session for this app user. The next extraction run will require manual login again.</p>
+              <div class="account-actions">
+                <button type="button" id="clear-instagram-cookies" class="button">Delete stored cookies</button>
+              </div>
+            </article>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <footer id="footer">
+      <div class="inner footer-layout">
+        <div class="footer-meta">
+          <ul class="icons footer-nav">
+            <li><a href="/extractor" class="icon solid alt fa-database"><span class="label">Extractor</span></a></li>
+            <li><a href="/explorer" class="icon solid alt fa-chart-bar"><span class="label">Explorer</span></a></li>
+            <li><a href="/advanced-analysis" class="icon solid alt fa-search"><span class="label">Advanced Analysis</span></a></li>
+            <li><a href="/faq" class="icon solid alt fa-book"><span class="label">FAQ</span></a></li>
+          </ul>
+          <ul class="copyright">
+            <li>&copy; Comment Lab</li>
+            <li>Workspace for extraction, exploration, and analysis</li>
+          </ul>
+        </div>
+        <ul class="icons footer-social">
+          <li><a href="https://www.instagram.com/andrian_hyriak/" class="icon brands alt fa-instagram" target="_blank" rel="noopener noreferrer"><span class="label">Instagram</span></a></li>
+          <li><a href="https://github.com/dobrogo-andrian" class="icon brands alt fa-github" target="_blank" rel="noopener noreferrer"><span class="label">GitHub</span></a></li>
+          <li><a href="https://www.linkedin.com/in/andrian-data-scientist/" class="icon brands alt fa-linkedin-in" target="_blank" rel="noopener noreferrer"><span class="label">LinkedIn</span></a></li>
+        </ul>
+      </div>
+    </footer>
+  </div>
+
+  <script src="../static/assets/js/jquery.min.js"></script>
+  <script src="../static/assets/js/jquery.scrolly.min.js"></script>
+  <script src="../static/assets/js/jquery.scrollex.min.js"></script>
+  <script src="../static/assets/js/browser.min.js"></script>
+  <script src="../static/assets/js/breakpoints.min.js"></script>
+  <script src="../static/assets/js/util.js"></script>
+  <script src="../static/assets/js/main.js"></script>
+  <script src="../static/backend/auth/session.js"></script>
+  <script src="../static/backend/auth/menu_auth.js"></script>
+  <script src="../static/backend/auth/account.js"></script>
+</body>
+</html>

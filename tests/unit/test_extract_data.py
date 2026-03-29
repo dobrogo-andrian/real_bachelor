@@ -1,6 +1,6 @@
 import io
+import json
 import os
-import pickle
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -93,17 +93,26 @@ class ExtractDataTests(unittest.TestCase):
     def test_setup_driver(self):
         fake_options_instance = MagicMock()
         fake_driver = FakeDriver()
-        fake_user_agent = SimpleNamespace(random="test-agent")
 
         with patch.object(extract_module, "Options", return_value=fake_options_instance), patch.object(
             extract_module.webdriver, "Chrome", return_value=fake_driver
         ) as mocked_chrome, patch.dict(os.environ, {"CHROMEDRIVER_PATH": "C:\\chromedriver.exe"}, clear=False):
-            driver = extract_module.setup_driver(fake_user_agent)
+            driver = extract_module.setup_driver()
 
         self.assertIs(driver, fake_driver)
-        fake_options_instance.add_argument.assert_any_call("user-agent=test-agent")
         mocked_chrome.assert_called_once()
-        self.assertTrue(hasattr(fake_driver, "cdp_command"))
+        self.assertFalse(hasattr(fake_driver, "cdp_command"))
+
+    def test_setup_driver_headless(self):
+        fake_options_instance = MagicMock()
+        fake_driver = FakeDriver()
+
+        with patch.object(extract_module, "Options", return_value=fake_options_instance), patch.object(
+            extract_module.webdriver, "Chrome", return_value=fake_driver
+        ), patch.dict(os.environ, {"CHROMEDRIVER_PATH": "C:\\chromedriver.exe"}, clear=False):
+            extract_module.setup_driver(headless=True)
+
+        fake_options_instance.add_argument.assert_any_call("--headless=new")
 
     def test_login_to_instagram(self):
         username_field = FakeElement()
@@ -147,33 +156,88 @@ class ExtractDataTests(unittest.TestCase):
         self.assertEqual(password_field.sent_keys[0], "secret")
 
     def test_save_cookies(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cookie_path = os.path.join(temp_dir, "cookie", "cookies.pkl")
-            driver = FakeDriver()
+        driver = FakeDriver()
 
-            with redirect_stdout(io.StringIO()):
-                extract_module.save_cookies(driver, filename=cookie_path)
+        with patch.object(extract_module, "store_user_instagram_cookies") as mocked_store, redirect_stdout(
+            io.StringIO()
+        ):
+            extract_module.save_cookies(driver, app_username="alice", instagram_username="insta")
 
-            self.assertTrue(os.path.exists(cookie_path))
-            with open(cookie_path, "rb") as handle:
-                self.assertEqual(pickle.load(handle), [{"name": "sessionid", "value": "abc"}])
+        mocked_store.assert_called_once()
+        self.assertEqual(mocked_store.call_args.args[0], "alice")
+        stored_payload = mocked_store.call_args.args[1]
+        self.assertEqual(
+            json.loads(stored_payload),
+            {
+                "app_username": "alice",
+                "cookies": [{"name": "sessionid", "value": "abc"}],
+                "instagram_username": "insta",
+                "version": 1,
+            },
+        )
 
     def test_load_cookies(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cookie_path = os.path.join(temp_dir, "cookies.pkl")
-            driver = FakeDriver()
+        driver = FakeDriver()
 
-            with redirect_stdout(io.StringIO()):
-                self.assertFalse(extract_module.load_cookies(driver, filename=cookie_path))
+        with patch.object(extract_module, "fetch_user_instagram_cookies", return_value=None), redirect_stdout(
+            io.StringIO()
+        ):
+            self.assertFalse(extract_module.load_cookies(driver, app_username="alice", instagram_username="insta"))
 
-            with open(cookie_path, "wb") as handle:
-                pickle.dump([{"name": "sessionid", "value": "abc"}], handle)
+        payload = json.dumps(
+            {
+                "version": 1,
+                "app_username": "alice",
+                "instagram_username": "insta",
+                "cookies": [{"name": "sessionid", "value": "abc"}],
+            }
+        )
+        with patch.object(extract_module, "fetch_user_instagram_cookies", return_value=payload), redirect_stdout(
+            io.StringIO()
+        ):
+            loaded = extract_module.load_cookies(driver, app_username="alice", instagram_username="insta")
 
-            with redirect_stdout(io.StringIO()):
-                loaded = extract_module.load_cookies(driver, filename=cookie_path)
+        self.assertTrue(loaded)
+        self.assertEqual(driver.cookies_added, [{"name": "sessionid", "value": "abc"}])
 
-            self.assertTrue(loaded)
-            self.assertEqual(driver.cookies_added, [{"name": "sessionid", "value": "abc"}])
+    def test_load_cookies_clears_invalid_payload(self):
+        driver = FakeDriver()
+
+        with patch.object(extract_module, "fetch_user_instagram_cookies", return_value="{"), patch.object(
+            extract_module, "clear_user_instagram_cookies"
+        ) as mocked_clear, redirect_stdout(io.StringIO()):
+            loaded = extract_module.load_cookies(driver, app_username="alice", instagram_username="insta")
+
+        self.assertFalse(loaded)
+        mocked_clear.assert_called_once_with("alice")
+
+    def test_detect_instagram_restriction(self):
+        driver = FakeDriver()
+        driver.page_source = "Ми маємо підозру, що у вашому обліковому записі виконуються автоматичні дії"
+
+        restriction = extract_module.detect_instagram_restriction(driver)
+
+        self.assertEqual(restriction, "Instagram flagged the session for suspected automation.")
+
+    def test_wait_for_manual_instagram_login_detects_completed_login(self):
+        driver = FakeDriver()
+        driver.current_url = "https://www.instagram.com/arthaslav/"
+
+        with patch.object(extract_module, "wait_for_profile_content"):
+            success, reason = extract_module.wait_for_manual_instagram_login(driver, timeout=1, poll_interval=0)
+
+        self.assertTrue(success)
+        self.assertIsNone(reason)
+
+    def test_wait_for_manual_instagram_login_detects_restriction(self):
+        driver = FakeDriver()
+        driver.page_source = "automated actions"
+
+        with patch.object(extract_module.time, "sleep"):
+            success, reason = extract_module.wait_for_manual_instagram_login(driver, timeout=1, poll_interval=0)
+
+        self.assertFalse(success)
+        self.assertIn("suspected automation", reason)
 
     def test_get_scroll_wait_profile(self):
         driver = FakeDriver()
@@ -411,8 +475,6 @@ class ExtractDataTests(unittest.TestCase):
         fake_driver = FakeDriver()
 
         with patch.object(extract_module, "delete_previos_files"), patch.object(
-            extract_module, "UserAgent", return_value=SimpleNamespace()
-        ), patch.object(
             extract_module, "setup_driver", return_value=fake_driver
         ), patch.object(
             extract_module, "human_pause"
@@ -421,7 +483,7 @@ class ExtractDataTests(unittest.TestCase):
         ), patch.object(
             extract_module, "load_cookies", return_value=False
         ), patch.object(
-            extract_module, "login_to_instagram", return_value=True
+            extract_module, "wait_for_manual_instagram_login", return_value=(True, None)
         ), patch.object(
             extract_module, "save_cookies"
         ), patch.object(
@@ -437,6 +499,7 @@ class ExtractDataTests(unittest.TestCase):
                 "arthaslav",
                 1,
                 existing_post_hrefs={"https://www.instagram.com/p/existing"},
+                app_username="app-alice",
             )
 
         self.assertEqual(result["target_page"], "arthaslav")
@@ -446,6 +509,53 @@ class ExtractDataTests(unittest.TestCase):
         self.assertEqual(result["comments_collected"], 4)
         self.assertEqual(result["saved_files"], ["unprocessed_data/comments1/arthaslav_1.csv"])
         self.assertTrue(fake_driver.refreshed)
+        self.assertTrue(fake_driver.quit_called)
+
+    def test_extract_data_aborts_when_instagram_flags_automation(self):
+        fake_driver = FakeDriver()
+        fake_driver.page_source = "automated actions"
+
+        with patch.object(extract_module, "delete_previos_files"), patch.object(
+            extract_module, "setup_driver", return_value=fake_driver
+        ), patch.object(
+            extract_module, "human_pause"
+        ), patch.object(
+            extract_module, "wait_for_document_ready"
+        ), redirect_stdout(io.StringIO()):
+            result = extract_module.extract_data(
+                "alice",
+                "secret",
+                "arthaslav",
+                1,
+                app_username="app-alice",
+            )
+
+        self.assertEqual(result["posts_loaded"], 0)
+        self.assertIn("suspected automation", result["aborted_reason"])
+        self.assertTrue(fake_driver.quit_called)
+
+    def test_extract_data_aborts_headless_session_only_when_cookies_missing(self):
+        fake_driver = FakeDriver()
+
+        with patch.object(extract_module, "delete_previos_files"), patch.object(
+            extract_module, "setup_driver", return_value=fake_driver
+        ), patch.object(
+            extract_module, "human_pause"
+        ), patch.object(
+            extract_module, "wait_for_document_ready"
+        ), patch.object(
+            extract_module, "load_cookies", return_value=False
+        ), redirect_stdout(io.StringIO()):
+            result = extract_module.extract_data(
+                "alice",
+                "secret",
+                "arthaslav",
+                1,
+                app_username="app-alice",
+                headless_session_only=True,
+            )
+
+        self.assertIn("Headless extraction requires a valid stored Instagram session", result["aborted_reason"])
         self.assertTrue(fake_driver.quit_called)
 
 

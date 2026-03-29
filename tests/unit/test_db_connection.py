@@ -1,4 +1,6 @@
 import ctypes
+import hashlib
+import hmac
 import unittest
 from datetime import datetime
 from unittest.mock import patch
@@ -164,6 +166,13 @@ class DbConnectionTests(unittest.TestCase):
         self.assertEqual(duplicate_status, 409)
         self.assertEqual(duplicate_response.get_json()["error"], "Username or email already exists")
 
+    def test_sign_instagram_cookie_payload(self):
+        with patch.dict("os.environ", {"COOKIE_SIGNING_SECRET": "cookie-secret"}, clear=False):
+            signature = db_module.sign_instagram_cookie_payload("payload")
+
+        expected = hmac.new(b"cookie-secret", b"payload", hashlib.sha256).digest()
+        self.assertEqual(signature, expected)
+
     def test_fetch_user(self):
         cursor = FakeCursor(fetchone_values=[("hash",)])
         conn = FakeConnection(cursor)
@@ -204,6 +213,116 @@ class DbConnectionTests(unittest.TestCase):
             {"instagram_login": "insta-login", "instagram_password": "insta-password"},
         )
         self.assertIsNone(missing)
+        self.assertTrue(conn.close_called)
+
+    def test_fetch_user_profile(self):
+        cursor = FakeCursor(
+            fetchone_values=[
+                (
+                    "alice",
+                    "alice@example.com",
+                    1,
+                    "2026-03-20T10:00:00",
+                    "2026-03-01T10:00:00",
+                    "2026-03-10T10:00:00",
+                    b"login",
+                    b"password",
+                    "2026-03-21T10:00:00",
+                )
+            ]
+        )
+        conn = FakeConnection(cursor)
+
+        with patch.object(db_module, "get_db_connection", return_value=conn), patch.object(
+            db_module, "unprotect_secret", return_value="insta-login"
+        ):
+            profile = db_module.fetch_user_profile("alice")
+
+        self.assertEqual(profile["email"], "alice@example.com")
+        self.assertTrue(profile["email_verified"])
+        self.assertEqual(profile["instagram_login"], "insta-login")
+        self.assertTrue(profile["has_instagram_password"])
+        self.assertTrue(profile["has_instagram_cookies"])
+
+    def test_fetch_account_statistics(self):
+        cursor = FakeCursor(fetchone_values=[(10,), (3,), (7,)])
+        conn = FakeConnection(cursor)
+
+        with patch.object(db_module, "get_db_connection", return_value=conn):
+            stats = db_module.fetch_account_statistics()
+
+        self.assertEqual(
+            stats,
+            {"total_comments": 10, "distinct_pages": 3, "enriched_comments": 7},
+        )
+
+    def test_set_user_email_verified(self):
+        cursor = FakeCursor()
+        conn = FakeConnection(cursor)
+
+        with patch.object(db_module, "get_db_connection", return_value=conn):
+            db_module.set_user_email_verified("alice", True)
+
+        self.assertIn("UPDATE Users", cursor.executed[0][0])
+        self.assertEqual(cursor.executed[0][1], (1, 1, "alice"))
+        self.assertTrue(conn.commit_called)
+
+    def test_update_user_instagram_credentials(self):
+        cursor = FakeCursor()
+        conn = FakeConnection(cursor)
+
+        with patch.object(db_module, "get_db_connection", return_value=conn), patch.object(
+            db_module, "protect_secret", side_effect=[b"login", b"password"]
+        ), patch.object(db_module.pyodbc, "Binary", side_effect=lambda value: value):
+            db_module.update_user_instagram_credentials("alice", "insta", "secret")
+
+        self.assertIn("UPDATE Users", cursor.executed[0][0])
+        self.assertEqual(cursor.executed[0][1], (b"login", b"password", "alice"))
+        self.assertTrue(conn.commit_called)
+
+    def test_store_user_instagram_cookies(self):
+        cursor = FakeCursor()
+        conn = FakeConnection(cursor)
+
+        with patch.object(db_module, "get_db_connection", return_value=conn), patch.object(
+            db_module, "protect_secret", return_value=b"encrypted"
+        ), patch.object(db_module, "sign_instagram_cookie_payload", return_value=b"signed"), patch.object(
+            db_module.pyodbc, "Binary", side_effect=lambda value: value
+        ):
+            db_module.store_user_instagram_cookies("alice", "payload")
+
+        self.assertIn("UPDATE Users", cursor.executed[0][0])
+        self.assertEqual(cursor.executed[0][1], (b"encrypted", b"signed", "alice"))
+        self.assertTrue(conn.commit_called)
+        self.assertTrue(cursor.closed)
+        self.assertTrue(conn.close_called)
+
+    def test_fetch_user_instagram_cookies(self):
+        cursor = FakeCursor(fetchone_values=[(b"encrypted", b"signed"), None])
+        conn = FakeConnection(cursor)
+
+        with patch.object(db_module, "get_db_connection", return_value=conn), patch.object(
+            db_module, "unprotect_secret", return_value="payload"
+        ), patch.object(db_module, "sign_instagram_cookie_payload", return_value=b"signed"):
+            payload = db_module.fetch_user_instagram_cookies("alice")
+            missing = db_module.fetch_user_instagram_cookies("bob")
+
+        self.assertEqual(payload, "payload")
+        self.assertIsNone(missing)
+        self.assertTrue(cursor.closed)
+        self.assertTrue(conn.close_called)
+
+    def test_fetch_user_instagram_cookies_rejects_signature_mismatch(self):
+        cursor = FakeCursor(fetchone_values=[(b"encrypted", b"signed")])
+        conn = FakeConnection(cursor)
+
+        with patch.object(db_module, "get_db_connection", return_value=conn), patch.object(
+            db_module, "unprotect_secret", return_value="payload"
+        ), patch.object(db_module, "sign_instagram_cookie_payload", return_value=b"other-signed"):
+            with self.assertRaises(ValueError):
+                db_module.fetch_user_instagram_cookies("alice")
+
+        self.assertTrue(cursor.closed)
         self.assertTrue(conn.close_called)
 
     def test_fetch_distinct_comment_dimensions(self):

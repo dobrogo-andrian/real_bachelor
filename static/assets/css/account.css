@@ -1,0 +1,151 @@
+.account-panel {
+  padding: 0 0 1rem;
+}
+
+.account-hero {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1.7fr) minmax(18rem, 1fr);
+  margin-bottom: 1.5rem;
+  align-items: stretch;
+}
+
+.account-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.account-card {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  min-height: 100%;
+}
+
+.account-card-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.account-card h3 {
+  margin-bottom: 1rem;
+  letter-spacing: 0.03em;
+}
+
+.account-card p {
+  margin-bottom: 1rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.account-profile {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.account-profile-row {
+  display: grid;
+  gap: 0.2rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.account-profile-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.account-profile-label {
+  font-size: 0.76rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.account-profile-value {
+  font-size: 1.15rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.account-stats {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.account-stat {
+  border-radius: 0.85rem;
+  padding: 1rem 1.1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.account-stat span {
+  display: block;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.58);
+  margin-bottom: 0.35rem;
+}
+
+.account-stat strong {
+  display: block;
+  font-size: 1.85rem;
+  line-height: 1.1;
+}
+
+.account-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.account-card-form .account-form,
+.account-card-form .account-actions {
+  margin-top: auto;
+}
+
+.account-form input {
+  margin-bottom: 0;
+}
+
+.account-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.account-actions .button,
+.account-form > .button {
+  width: 100%;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.35;
+  min-height: 3.5rem;
+  padding: 0.95rem 1.1rem;
+  letter-spacing: 0.18em;
+  font-size: 0.74rem;
+}
+
+.account-status {
+  min-height: 1.5rem;
+  margin: 0 0 1rem;
+  padding-left: 0.15rem;
+}
+
+.account-status.is-error {
+  color: #ffb3b3;
+}
+
+.account-status.is-success {
+  color: #b9f6ca;
+}
+
+@media screen and (max-width: 980px) {
+  .account-hero {
+    grid-template-columns: 1fr;
+  }
+}

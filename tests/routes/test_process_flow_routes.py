@@ -37,6 +37,21 @@ class ProcessFlowRouteTests(AppTestCase):
                 ),
             },
             {
+                "name": "process_data_returns_conflict_when_extraction_aborts",
+                "payload": {"params": {"param1": "arthaslav", "param2": "3"}},
+                "credentials": {"instagram_login": "insta", "instagram_password": "secret"},
+                "extract_result": {"aborted_reason": "Instagram flagged the session for suspected automation."},
+                "load_result": {"rows_loaded": 999, "files_processed": 9},
+                "expected_status": 409,
+                "assertions": lambda response, mocked_load: (
+                    self.assertEqual(
+                        response.get_json()["error"],
+                        "Instagram flagged the session for suspected automation.",
+                    ),
+                    mocked_load.assert_not_called(),
+                ),
+            },
+            {
                 "name": "process_data_rejects_missing_instagram_credentials",
                 "payload": {"params": {"param1": "arthaslav", "param2": "3"}},
                 "credentials": {"instagram_login": "", "instagram_password": ""},
@@ -65,7 +80,7 @@ class ProcessFlowRouteTests(AppTestCase):
                     app_module, "fetch_existing_post_hrefs", return_value=["href-1"]
                 ), patch.object(
                     app_module, "extract_data", return_value=scenario["extract_result"]
-                ), patch.object(
+                ) as mocked_extract, patch.object(
                     app_module, "load_to_db", return_value=scenario["load_result"]
                 ) as mocked_load:
                     response = self.client.post(
@@ -75,7 +90,49 @@ class ProcessFlowRouteTests(AppTestCase):
                     )
 
                 self.assertEqual(response.status_code, scenario["expected_status"])
+                if scenario["expected_status"] != 400:
+                    mocked_extract.assert_called_once_with(
+                        "insta",
+                        "secret",
+                        "arthaslav",
+                        3,
+                        existing_post_hrefs=["href-1"],
+                        app_username="alice",
+                        headless_session_only=False,
+                    )
                 scenario["assertions"](response, mocked_load)
+
+    def test_process_data_passes_headless_session_flag(self):
+        self.set_access_cookie("alice")
+        with patch.object(
+            app_module,
+            "fetch_user_instagram_credentials",
+            return_value={"instagram_login": "insta", "instagram_password": "secret"},
+        ), patch.object(
+            app_module, "fetch_existing_post_hrefs", return_value=["href-1"]
+        ), patch.object(
+            app_module,
+            "extract_data",
+            return_value={"new_posts_found": 1, "posts_loaded": 1, "comments_collected": 2, "saved_files": ["one.csv"]},
+        ) as mocked_extract, patch.object(
+            app_module, "load_to_db", return_value={"rows_loaded": 2, "files_processed": 1}
+        ):
+            response = self.client.post(
+                "/process-data",
+                json={"params": {"param1": "arthaslav", "param2": "3", "headless_session_only": True}},
+                headers=self.make_json_headers(csrf="access"),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mocked_extract.assert_called_once_with(
+            "insta",
+            "secret",
+            "arthaslav",
+            3,
+            existing_post_hrefs=["href-1"],
+            app_username="alice",
+            headless_session_only=True,
+        )
 
     def test_process_data_endpoint_validates_request_payload(self):
         scenarios = [

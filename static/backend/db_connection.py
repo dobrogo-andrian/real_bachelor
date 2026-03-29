@@ -1,4 +1,6 @@
 import ctypes
+import hashlib
+import hmac
 import os
 import pyodbc
 from flask import jsonify
@@ -50,6 +52,10 @@ _crypt_unprotect_data.restype = wintypes.BOOL
 _local_free = _kernel32.LocalFree
 _local_free.argtypes = [wintypes.HLOCAL]
 _local_free.restype = wintypes.HLOCAL
+
+
+COOKIE_PAYLOAD_SECRET_ENV = "COOKIE_SIGNING_SECRET"
+COOKIE_PAYLOAD_FALLBACK_ENV = "JWT_SECRET_KEY"
 
 
 def _normalize_filter_values(value):
@@ -262,6 +268,87 @@ def insert_new_user(username, email, password, instagram_login, instagram_passwo
         conn.close()
 
 
+def _get_cookie_signing_key():
+    secret = os.getenv(COOKIE_PAYLOAD_SECRET_ENV) or os.getenv(COOKIE_PAYLOAD_FALLBACK_ENV)
+    if not secret:
+        raise RuntimeError(
+            f"Set {COOKIE_PAYLOAD_SECRET_ENV} or {COOKIE_PAYLOAD_FALLBACK_ENV} before storing Instagram cookies."
+        )
+    return secret.encode("utf-8")
+
+
+def sign_instagram_cookie_payload(payload):
+    if payload is None:
+        return None
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    return hmac.new(_get_cookie_signing_key(), payload, hashlib.sha256).digest()
+
+
+def store_user_instagram_cookies(username, payload):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        encrypted_payload = protect_secret(payload)
+        signature = sign_instagram_cookie_payload(payload)
+        cursor.execute(
+            """
+            UPDATE Users
+            SET InstagramCookiesEncrypted = ?, InstagramCookiesSignature = ?, InstagramCookiesUpdatedAt = SYSUTCDATETIME()
+            WHERE Username = ?
+            """,
+            (pyodbc.Binary(encrypted_payload), pyodbc.Binary(signature), username),
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def clear_user_instagram_cookies(username):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE Users
+            SET InstagramCookiesEncrypted = NULL, InstagramCookiesSignature = NULL, InstagramCookiesUpdatedAt = NULL
+            WHERE Username = ?
+            """,
+            (username,),
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def fetch_user_instagram_cookies(username):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT InstagramCookiesEncrypted, InstagramCookiesSignature
+            FROM Users
+            WHERE Username = ?
+            """,
+            (username,),
+        )
+        row = cursor.fetchone()
+        if not row or not row[0] or not row[1]:
+            return None
+
+        payload = unprotect_secret(row[0])
+        expected_signature = sign_instagram_cookie_payload(payload)
+        if not hmac.compare_digest(expected_signature, bytes(row[1])):
+            raise ValueError("Instagram cookie payload signature mismatch.")
+        return payload
+    finally:
+        cursor.close()
+        conn.close()
+
+
 
 def fetch_user(username):
     conn = get_db_connection()
@@ -312,6 +399,130 @@ def fetch_user_instagram_credentials(username):
             "instagram_login": unprotect_secret(row[0]) if row[0] else None,
             "instagram_password": unprotect_secret(row[1]) if row[1] else None,
         }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def fetch_user_profile(username):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT
+                Username,
+                Email,
+                EmailVerified,
+                EmailVerifiedAt,
+                CreatedAt,
+                PasswordChangedAt,
+                InstagramLoginEncrypted,
+                InstagramPasswordEncrypted,
+                InstagramCookiesUpdatedAt
+            FROM Users
+            WHERE Username = ?
+            """,
+            (username,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        return {
+            "username": row[0],
+            "email": row[1],
+            "email_verified": bool(row[2]),
+            "email_verified_at": row[3],
+            "created_at": row[4],
+            "password_changed_at": row[5],
+            "instagram_login": unprotect_secret(row[6]) if row[6] else None,
+            "has_instagram_password": bool(row[7]),
+            "instagram_cookies_updated_at": row[8],
+            "has_instagram_cookies": bool(row[8]),
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def fetch_account_statistics():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        stats = {
+            "total_comments": 0,
+            "distinct_pages": 0,
+            "enriched_comments": 0,
+        }
+        try:
+            cursor.execute("SELECT COUNT(*) FROM [dbo].[Comments]")
+            row = cursor.fetchone()
+            stats["total_comments"] = int(row[0]) if row and row[0] is not None else 0
+
+            cursor.execute("SELECT COUNT(DISTINCT [PageID]) FROM [dbo].[Comments]")
+            row = cursor.fetchone()
+            stats["distinct_pages"] = int(row[0]) if row and row[0] is not None else 0
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("SELECT COUNT(*) FROM [dbo].[EnrichedComments]")
+            row = cursor.fetchone()
+            stats["enriched_comments"] = int(row[0]) if row and row[0] is not None else 0
+        except Exception:
+            pass
+
+        return stats
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def set_user_email_verified(username, verified):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE Users
+            SET
+                EmailVerified = ?,
+                EmailVerifiedAt = CASE WHEN ? = 1 THEN SYSUTCDATETIME() ELSE NULL END
+            WHERE Username = ?
+            """,
+            (1 if verified else 0, 1 if verified else 0, username),
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def update_user_instagram_credentials(username, instagram_login, instagram_password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        encrypted_instagram_login = protect_secret(instagram_login) if instagram_login else None
+        encrypted_instagram_password = protect_secret(instagram_password) if instagram_password else None
+        cursor.execute(
+            """
+            UPDATE Users
+            SET
+                InstagramLoginEncrypted = ?,
+                InstagramPasswordEncrypted = ?,
+                InstagramCookiesEncrypted = NULL,
+                InstagramCookiesSignature = NULL,
+                InstagramCookiesUpdatedAt = NULL
+            WHERE Username = ?
+            """,
+            (
+                pyodbc.Binary(encrypted_instagram_login) if encrypted_instagram_login else None,
+                pyodbc.Binary(encrypted_instagram_password) if encrypted_instagram_password else None,
+                username,
+            ),
+        )
+        conn.commit()
     finally:
         cursor.close()
         conn.close()

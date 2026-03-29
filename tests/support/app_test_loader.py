@@ -52,8 +52,15 @@ def _temporary_backend_stubs():
     db_connection_module = types.ModuleType("static.backend.db_connection")
     db_connection_module.insert_new_user = lambda *args, **kwargs: None
     db_connection_module.fetch_user = lambda *args, **kwargs: None
+    db_connection_module.fetch_user_profile = lambda *args, **kwargs: None
+    db_connection_module.fetch_account_statistics = lambda *args, **kwargs: {}
     db_connection_module.update_user_password_hash = lambda *args, **kwargs: None
+    db_connection_module.update_user_instagram_credentials = lambda *args, **kwargs: None
+    db_connection_module.set_user_email_verified = lambda *args, **kwargs: None
     db_connection_module.fetch_user_instagram_credentials = lambda *args, **kwargs: None
+    db_connection_module.fetch_user_instagram_cookies = lambda *args, **kwargs: None
+    db_connection_module.store_user_instagram_cookies = lambda *args, **kwargs: None
+    db_connection_module.clear_user_instagram_cookies = lambda *args, **kwargs: None
     db_connection_module.fetch_distinct_comment_dimensions = (
         lambda *args, **kwargs: {"page_names": [], "page_ids": []}
     )

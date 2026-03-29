@@ -1,6 +1,7 @@
 flask
 flask-cors
 flask-jwt-extended
+werkzeug
 pyodbc
 selenium
 fake-useragent

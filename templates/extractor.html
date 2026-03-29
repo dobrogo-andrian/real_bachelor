@@ -11,118 +11,9 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 		<link rel="stylesheet" href="../static/assets/css/main.css" />
 		<link rel="stylesheet" href="../static/assets/css/generic.css">
+		<link rel="stylesheet" href="../static/assets/css/extractor.css" />
+		<link rel="stylesheet" href="../static/assets/css/footer.css" />
 		<noscript><link rel="stylesheet" href="../static/assets/css/noscript.css" /></noscript>
-		<style>
-			.processing-filters {
-				display: none;
-				grid-template-columns: minmax(0, 1fr) auto;
-				align-items: end;
-				gap: 1.5rem;
-				margin-bottom: 1.5rem;
-			}
-
-			.processing-filters.is-visible {
-				display: grid;
-			}
-
-			.processing-filter-field {
-				display: none;
-			}
-
-			.processing-filter-field.is-visible {
-				display: block;
-			}
-
-			.processing-submit {
-				min-width: 12rem;
-			}
-
-			.processing-actions {
-				display: flex;
-				flex-direction: column;
-				gap: 1.5rem;
-			}
-
-			.processing-actions-top {
-				display: grid;
-				grid-template-columns: repeat(3, minmax(0, 1fr));
-				gap: 1.5rem;
-			}
-
-			.processing-button {
-				appearance: none;
-				width: 100%;
-				min-height: 12rem;
-				border: 1px solid rgba(255, 255, 255, 0.15);
-				border-radius: 0.4rem;
-				padding: 1.25rem;
-				background: rgba(255, 255, 255, 0.03);
-				color: inherit;
-				cursor: pointer;
-				display: flex;
-				flex-direction: column;
-				align-items: center;
-				justify-content: center;
-				gap: 1rem;
-				text-align: center;
-				transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-			}
-
-			.processing-button:hover {
-				background: rgba(255, 255, 255, 0.08);
-				border-color: rgba(255, 255, 255, 0.3);
-				transform: translateY(-2px);
-			}
-
-			.processing-button-title {
-				display: block;
-				font-size: 1rem;
-				font-weight: 700;
-				letter-spacing: 0.14em;
-				text-transform: uppercase;
-				line-height: 1.5;
-			}
-
-			.processing-button-text {
-				margin: 0;
-				font-size: 0.9rem;
-				line-height: 1.6;
-				letter-spacing: 0.08em;
-				text-transform: uppercase;
-				max-width: 24rem;
-				white-space: normal;
-			}
-
-			.processing-button-delta {
-				min-height: 14rem;
-			}
-
-			.analysis-status,
-			.analysis-result-box {
-				border: 1px solid rgba(255, 255, 255, 0.15);
-				border-radius: 0.4rem;
-				padding: 1.25rem;
-				background: rgba(255, 255, 255, 0.03);
-			}
-
-			.analysis-status {
-				margin-bottom: 1.5rem;
-				min-height: 5rem;
-			}
-
-			.analysis-result-box pre {
-				margin: 0;
-				white-space: pre-wrap;
-				word-break: break-word;
-			}
-
-			@media screen and (max-width: 736px) {
-				.processing-filters,
-				.processing-actions-top {
-					grid-template-columns: 1fr;
-				}
-			}
-		</style>
 	</head>
 	<body class="is-preload">
 
@@ -141,13 +32,13 @@
 					<nav id="menu">
 						<ul class="links">
 							<li><a href="/">Home</a></li>
+							<li><a href="/extractor">Extractor</a></li>
 							<li><a href="/explorer">Explorer</a></li>
 							<li><a href="/advanced-analysis">Advanced Analysis</a></li>
-							<li><a href="/extractor">Extractor</a></li>
 						</ul>
 						<ul class="actions stacked">
-							<li><a href="/explorer" class="button primary fit">Open Explorer</a></li>
-							<li><a href="/advanced-analysis" class="button fit">Advanced analysis</a></li>
+							<li id="menu-primary-action"><a href="/signup" class="button primary fit">Sign Up</a></li>
+							<li id="menu-secondary-action"><a href="/login" class="button fit">Log In</a></li>
 						</ul>
 					</nav>
 
@@ -171,13 +62,17 @@
 					<section id="contact">
 						<div class="inner">
 							<section>
+								<div class="extraction-section-header">
+									<header class="major">
+										<h2>Data extraction</h2>
+									</header>
+								</div>
 								<p>here should be info about what you will be writing and progressbar</p>
 								<div id="response-div">
-									<p id="response-p">here will be the text of the responce</p>
+									<p id="response-p">here will be the text of the response</p>
 								</div>
-
 							</section>
-							<section class="split">
+							<div class="split">
 								<section>
 									<div class="contact-method">
 										<span class="icon solid alt fa-envelope"></span>
@@ -185,17 +80,27 @@
 										<input type="text" id="instagram_page" required />
 										<label for="number_of_posts">Number of posts</label>
 										<input type="text" id="number_of_posts" required />
-										<p>Instagram credentials will be taken from the account currently logged in to Comment Lab.</p>
+										<p>Uses the Instagram credentials stored for the current Comment Lab account.</p>
 									</div>
 								</section>
 
 								<section>
-									<div class="contact-method">
-										<button class="button" id="start_execution">Start execution</button>
+									<div class="contact-method extractor-action-panel">
+										<button class="button primary" id="start_execution">Start visible extraction</button>
+										<div class="manual-login-hint" id="manual-login-hint">
+											<p><strong>Manual login hint</strong></p>
+											<p>Instagram login: <span id="manual-login-username">Loading...</span></p>
+											<p>Password hint: <span id="manual-login-password-hint">Loading...</span></p>
+											<p>If manual login is required, use the stored Instagram credentials for this Comment Lab account. No automatic hidden login will be attempted.</p>
+										</div>
+										<div class="extractor-run-options">
+											<p><strong>Stored-session headless run</strong></p>
+											<p>Use only when a valid Instagram session is already stored for this app user.</p>
+											<button class="button" id="start_headless_execution" type="button">Start headless extraction</button>
+										</div>
 									</div>
 								</section>
-							</section>
-
+							</div>
 						</div>
 					</section>
 
@@ -255,18 +160,23 @@
 
 				<!-- Footer -->
 					<footer id="footer">
-						<div class="inner">
-							<ul class="icons">
-								<li><a href="#" class="icon brands alt fa-twitter"><span class="label">Twitter</span></a></li>
-								<li><a href="#" class="icon brands alt fa-facebook-f"><span class="label">Facebook</span></a></li>
-								<li><a href="#" class="icon brands alt fa-instagram"><span class="label">Instagram</span></a></li>
-								<li><a href="#" class="icon brands alt fa-github"><span class="label">GitHub</span></a></li>
-								<li><a href="#" class="icon brands alt fa-linkedin-in"><span class="label">LinkedIn</span></a></li>
-							</ul>
-							<ul class="copyright">
-								<li>&copy; Untitled</li><li>Design: <a href="https://html5up.net">HTML5 UP</a></li>
-								<li><a href="/faq">FAQ</a></li>
-								<li><a href="/elements">Elements</a></li>
+						<div class="inner footer-layout">
+							<div class="footer-meta">
+								<ul class="icons footer-nav">
+									<li><a href="/extractor" class="icon solid alt fa-database"><span class="label">Extractor</span></a></li>
+									<li><a href="/explorer" class="icon solid alt fa-chart-bar"><span class="label">Explorer</span></a></li>
+									<li><a href="/advanced-analysis" class="icon solid alt fa-search"><span class="label">Advanced Analysis</span></a></li>
+									<li><a href="/faq" class="icon solid alt fa-book"><span class="label">FAQ</span></a></li>
+								</ul>
+								<ul class="copyright">
+									<li>&copy; Comment Lab</li>
+									<li>Workspace for extraction, exploration, and analysis</li>
+								</ul>
+							</div>
+							<ul class="icons footer-social">
+								<li><a href="https://www.instagram.com/andrian_hyriak/" class="icon brands alt fa-instagram" target="_blank" rel="noopener noreferrer"><span class="label">Instagram</span></a></li>
+								<li><a href="https://github.com/dobrogo-andrian" class="icon brands alt fa-github" target="_blank" rel="noopener noreferrer"><span class="label">GitHub</span></a></li>
+								<li><a href="https://www.linkedin.com/in/andrian-data-scientist/" class="icon brands alt fa-linkedin-in" target="_blank" rel="noopener noreferrer"><span class="label">LinkedIn</span></a></li>
 							</ul>
 						</div>
 					</footer>
@@ -282,193 +192,8 @@
 			<script src=".././static/assets/js/util.js"></script>
 			<script src=".././static/assets/js/main.js"></script>
 			<script src=".././static/backend/auth/session.js"></script>
-			<script>
-				const session = window.CommentLabSession;
-				const analysisResultsSection = document.getElementById('analysis-results');
-				const analysisStatusText = document.getElementById('analysis-status-text');
-				const analysisResultOutput = document.getElementById('analysis-result-output');
-				const processingFilters = document.querySelector('.processing-filters');
-				const processingPageNameInput = document.getElementById('processing_page_name');
-				const processingPageIdInput = document.getElementById('processing_page_id');
-				const processingPageNameField = document.getElementById('processing_page_name_field');
-				const processingPageIdField = document.getElementById('processing_page_id_field');
-				const processingSubmitButton = document.getElementById('processing_submit');
-				const processingButtons = [
-					document.getElementById('analyze_page_name'),
-					document.getElementById('analyze_page_id'),
-					document.getElementById('analyze_whole_db'),
-					document.getElementById('analyze_delta')
-				];
-				let pendingAnalysisMode = null;
-				let pendingAnalysisLabel = null;
-
-				function setProcessingButtonsDisabled(disabled) {
-					processingButtons.forEach((button) => {
-						button.disabled = disabled;
-					});
-					processingSubmitButton.disabled = disabled;
-				}
-
-				function scrollToAnalysisResults() {
-					analysisResultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-				}
-
-				function hideProcessingFilters() {
-					processingFilters.classList.remove('is-visible');
-					processingPageNameField.classList.remove('is-visible');
-					processingPageIdField.classList.remove('is-visible');
-					processingPageNameInput.value = '';
-					processingPageIdInput.value = '';
-					pendingAnalysisMode = null;
-					pendingAnalysisLabel = null;
-				}
-
-				function showProcessingFilters(mode, optionLabel) {
-					const isSameModeVisible =
-						processingFilters.classList.contains('is-visible') &&
-						pendingAnalysisMode === mode;
-
-					if (isSameModeVisible) {
-						hideProcessingFilters();
-						return;
-					}
-
-					pendingAnalysisMode = mode;
-					pendingAnalysisLabel = optionLabel;
-					processingFilters.classList.add('is-visible');
-					processingPageNameField.classList.toggle('is-visible', mode === 'page_name');
-					processingPageIdField.classList.toggle('is-visible', mode === 'page_id');
-
-					if (mode === 'page_name') {
-						processingPageIdInput.value = '';
-						processingPageNameInput.focus();
-					} else {
-						processingPageNameInput.value = '';
-						processingPageIdInput.focus();
-					}
-				}
-
-				async function runAnalysis(mode, optionLabel) {
-					const payload = {
-						mode: mode,
-						page_name: processingPageNameInput.value.trim(),
-						page_id: processingPageIdInput.value.trim()
-					};
-
-					analysisStatusText.textContent = `we analysing ${optionLabel} please wait`;
-					analysisResultOutput.textContent = 'Processing...';
-					scrollToAnalysisResults();
-					setProcessingButtonsDisabled(true);
-
-					try {
-						const rawResponse = await session.fetchWithCsrf('/enrich-comments', {
-							method: 'POST',
-							headers: {
-								'Content-Type': 'application/json',
-								'Accept': 'application/json'
-							},
-							body: JSON.stringify(payload)
-						});
-
-						const response = await session.ensureAuthenticatedResponse(rawResponse);
-						if (!response) {
-							return;
-						}
-
-						const responseData = await response.json();
-						if (!response.ok) {
-							throw new Error(responseData.error || 'Failed to run enrichment.');
-						}
-
-						analysisStatusText.textContent = `Analysis completed for ${optionLabel}.`;
-						analysisResultOutput.textContent = JSON.stringify(responseData.result, null, 2);
-					} catch (error) {
-						analysisStatusText.textContent = `Analysis failed for ${optionLabel}.`;
-						analysisResultOutput.textContent = error.message;
-					} finally {
-						setProcessingButtonsDisabled(false);
-					}
-				}
-
-				document.getElementById('analyze_page_name').addEventListener('click', () => {
-					showProcessingFilters('page_name', 'page name');
-				});
-
-				document.getElementById('analyze_page_id').addEventListener('click', () => {
-					showProcessingFilters('page_id', 'page id');
-				});
-
-				document.getElementById('analyze_whole_db').addEventListener('click', () => {
-					hideProcessingFilters();
-					runAnalysis('whole_db', 'whole db');
-				});
-
-				document.getElementById('analyze_delta').addEventListener('click', () => {
-					hideProcessingFilters();
-					runAnalysis('delta', 'delta');
-				});
-
-				processingSubmitButton.addEventListener('click', () => {
-					if (!pendingAnalysisMode) {
-						return;
-					}
-
-					runAnalysis(pendingAnalysisMode, pendingAnalysisLabel);
-					hideProcessingFilters();
-				});
-
-				document.getElementById('start_execution').addEventListener('click', async () => {
-				  // Get input values
-				  const param1 = document.getElementById('instagram_page').value;
-				  const param2 = document.getElementById('number_of_posts').value;
-				  // Prepare the request payload
-				  const payload = {
-					params: {
-					  	param1: param1,
-					  	param2: param2
-					}
-				  };
-
-				  try {
-					// Send POST request to the backend
-					const rawResponse = await session.fetchWithCsrf('/process-data', {
-					  method: 'POST',
-					  headers: {
-						'Content-Type': 'application/json',
-						'Accept': 'application/json'
-					  },
-					  body: JSON.stringify(payload)
-					});
-
-					const response = await session.ensureAuthenticatedResponse(rawResponse);
-					if (!response) {
-						return;
-					}
-
-					if (response.ok) {
-					  const data = await response.json();
-					  console.log('Response:', data);
-
-					  // Display the result
-					  document.getElementById('response-p').textContent = [
-                        `Target page: ${data.result.target_page}`,
-                        `Posts requested: ${data.result.posts_requested}`,
-                        `Posts successfully loaded: ${data.result.posts_loaded}`,
-                        `Comments collected: ${data.result.comments_collected}`,
-                        `Rows loaded into DB: ${data.result.rows_loaded_to_db}`,
-                        `CSV files processed: ${data.result.files_processed}`
-                      ].join('\n');
-					} else {
-					  const errorData = await response.json();
-					  console.error('Error:', errorData);
-					  document.getElementById('response-p').textContent = `Error: ${errorData.error}`;
-					}
-				  } catch (error) {
-					console.error('Error fetching data:', error);
-					document.getElementById('response-p').textContent = `Error: ${error.message}`;
-				  }
-				});
-			</script>
+			<script src=".././static/backend/auth/menu_auth.js"></script>
+			<script src=".././static/assets/js/extractor.js"></script>
 
 	</body>
 </html>

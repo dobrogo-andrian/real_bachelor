@@ -5,7 +5,7 @@
 ## What the project does
 
 - Authenticates users with JWT cookies.
-- Stores application users and encrypted Instagram credentials in SQL Server.
+- Stores application users, encrypted Instagram credentials, and per-user protected Instagram session cookies in SQL Server.
 - Stores application passwords as adaptive `scrypt` hashes and upgrades legacy SHA-256 hashes on successful login.
 - Runs an Instagram extraction workflow with Selenium and ChromeDriver.
 - Loads scraped CSV files into a `Comments` table.
@@ -19,6 +19,8 @@
 3. The extractor page calls `/process-data`, which:
    - fetches the logged-in user's Instagram credentials,
    - runs `extract_data(...)`,
+   - reuses that user's signed Instagram session cookies when available, otherwise waits for manual login in the opened browser window and then updates the stored cookie payload,
+   - aborts the run if Instagram shows a restriction or challenge page,
    - loads discovered CSV files from `unprocessed_data/` into SQL Server with `load_to_db(...)`.
 4. The user can call `/enrich-comments` to populate or refresh `EnrichedComments`.
 5. The explorer and advanced-analysis pages query enriched rows and build chart-ready summaries.
@@ -26,7 +28,7 @@
 ## Key routes
 
 - Public pages: `/`, `/login`, `/signup`, `/test`
-- Authenticated pages: `/extractor`, `/explorer`, `/advanced-analysis`, `/faq`, `/elements`
+- Authenticated pages: `/extractor`, `/explorer`, `/advanced-analysis`, `/faq`, `/elements`, `/account`
 - API endpoints:
   - `/refresh`
   - `/logout`
@@ -42,12 +44,10 @@
 
 - `app.py`: Flask entrypoint, route definitions, JWT handling, and orchestration of extraction/loading/enrichment/analysis.
 - `static/backend/`: Python backend modules and page-specific frontend scripts.
-- `templates/`: Jinja/HTML pages for login, signup, extractor, explorer, advanced analysis, FAQ, and landing pages.
+- `templates/`: Jinja/HTML pages for login, signup, account management, extractor, explorer, advanced analysis, FAQ, and landing pages.
 - `static/assets/`: HTML5UP "Forty" theme assets plus project CSS.
 - `ddl/`: SQL Server table definitions for `Users`, `Comments`, and `EnrichedComments`.
 - `unprocessed_data/`: generated raw CSV files from extraction jobs.
-- `cookie/`: persisted Selenium session cookies.
-
 Detailed structure notes live in `PROJECT_STRUCTURE.md`.
 
 ## Requirements
@@ -88,8 +88,10 @@ pip install -r requirements.txt
    - `.env.example` lists the required variables.
    - `.env` is loaded automatically on app startup.
    - Set at least `JWT_SECRET_KEY`, `DB_SERVER`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`.
+   - Optionally set `COOKIE_SIGNING_SECRET`; if omitted, signed Instagram cookie payloads fall back to `JWT_SECRET_KEY`.
 4. Create the SQL Server database and tables from:
    - `ddl/Users.sql`
+   - `ddl/Users_AddInstagramCookies.sql` for existing databases that need the new cookie columns
    - `ddl/Comments.sql`
    - `ddl/EnrichedComments.sql`
    - For an existing database, apply `ddl/migrations/001_harden_users_password_storage.sql`.
@@ -104,7 +106,7 @@ The app runs on `http://localhost:5000`.
 
 ## Data model
 
-- `Users`: application users plus encrypted Instagram credentials.
+- `Users`: application users plus email-verification metadata, encrypted Instagram credentials, and per-user protected Instagram session cookies.
 - `Comments`: raw ingested comments keyed by `CommentHash`.
 - `EnrichedComments`: language-processed and sentiment-scored comments keyed by the same `CommentHash`.
 

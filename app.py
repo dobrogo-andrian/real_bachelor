@@ -17,15 +17,20 @@ from static.backend.load_to_db import load_to_db
 from static.backend.enrich_comments import enrich_comments
 from static.backend.explorer_analysis import build_page_analysis, build_analysis_from_rows
 from static.backend.db_connection import (
+    clear_user_instagram_cookies,
+    fetch_account_statistics,
     insert_new_user,
     fetch_user,
+    fetch_user_profile,
     fetch_user_instagram_credentials,
     fetch_distinct_comment_dimensions,
     fetch_existing_post_hrefs,
     fetch_advanced_comment_dimensions,
     fetch_enriched_comment_preview,
     fetch_enriched_comment_rows,
+    set_user_email_verified,
     update_user_password_hash,
+    update_user_instagram_credentials,
 )
 from flask_cors import CORS
 from flask_jwt_extended import (
@@ -77,6 +82,25 @@ def verify_user_password(stored_password_hash, provided_password):
         return False, None
 
     return check_password_hash(stored_password_hash, provided_password), None
+
+
+def verify_application_password(username, provided_password):
+    user = fetch_user(username)
+    if not user:
+        return False
+
+    password_valid, upgraded_password_hash = verify_user_password(user[0], provided_password)
+    if password_valid and upgraded_password_hash:
+        update_user_password_hash(username, upgraded_password_hash)
+    return password_valid
+
+
+def mask_secret_for_hint(secret):
+    if not secret:
+        return "Not configured"
+    if len(secret) <= 2:
+        return "*" * len(secret)
+    return f"{secret[0]}{'*' * (len(secret) - 2)}{secret[-1]}"
 
 
 @app.route('/static/<path:filename>')
@@ -151,7 +175,10 @@ def logout():
 @jwt_required()
 def user_info():
     current_user = get_jwt_identity()
-    return jsonify(username=current_user, email="email@example.com")
+    profile = fetch_user_profile(current_user)
+    if not profile:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify(username=current_user, email=profile['email'])
 
 
 @app.route('/')
@@ -173,6 +200,112 @@ def extractor():
     current_user = get_jwt_identity()
     logger.debug(f"Current user: {current_user}")
     return render_template('extractor.html')
+
+
+@app.route('/account')
+@jwt_required()
+def account():
+    current_user = get_jwt_identity()
+    logger.debug(f"Current user: {current_user}")
+    return render_template('account.html', current_user=current_user)
+
+
+@app.route('/api/account')
+@jwt_required()
+def account_details():
+    current_user = get_jwt_identity()
+    profile = fetch_user_profile(current_user)
+    if not profile:
+        return jsonify({'error': 'User not found'}), 404
+
+    return jsonify(
+        {
+            'profile': profile,
+            'stats': fetch_account_statistics(),
+        }
+    )
+
+
+@app.route('/api/account/manual-login-hint')
+@jwt_required()
+def account_manual_login_hint():
+    current_user = get_jwt_identity()
+    instagram_credentials = fetch_user_instagram_credentials(current_user)
+    if not instagram_credentials:
+        return jsonify({'error': 'Instagram credentials are not configured for this user.'}), 404
+
+    instagram_login = instagram_credentials.get('instagram_login')
+    instagram_password = instagram_credentials.get('instagram_password')
+    return jsonify(
+        {
+            'instagram_login': instagram_login or '',
+            'instagram_password_hint': mask_secret_for_hint(instagram_password or ''),
+        }
+    ), 200
+
+
+@app.route('/api/account/change-password', methods=['POST'])
+@jwt_required()
+def account_change_password():
+    current_user = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    current_password = data.get('current_password', '')
+    new_password = data.get('new_password', '')
+
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current password and new password are required.'}), 400
+    if len(new_password) < 8:
+        return jsonify({'error': 'New password must be at least 8 characters long.'}), 400
+    if not verify_application_password(current_user, current_password):
+        return jsonify({'error': 'Current password is incorrect.'}), 401
+
+    update_user_password_hash(current_user, hash_user_password(new_password))
+    return jsonify({'message': 'Password updated successfully.'}), 200
+
+
+@app.route('/api/account/verify-email', methods=['POST'])
+@jwt_required()
+def account_verify_email():
+    current_user = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    current_password = data.get('current_password', '')
+    if not current_password:
+        return jsonify({'error': 'Current password is required.'}), 400
+    if not verify_application_password(current_user, current_password):
+        return jsonify({'error': 'Current password is incorrect.'}), 401
+
+    set_user_email_verified(current_user, True)
+    return jsonify({'message': 'Email marked as verified for this local account.'}), 200
+
+
+@app.route('/api/account/instagram-cookies/clear', methods=['POST'])
+@jwt_required()
+def account_clear_instagram_cookies():
+    current_user = get_jwt_identity()
+    clear_user_instagram_cookies(current_user)
+    return jsonify({'message': 'Stored Instagram cookies cleared.'}), 200
+
+
+@app.route('/api/account/instagram-credentials', methods=['POST'])
+@jwt_required()
+def account_update_instagram_credentials():
+    current_user = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    instagram_login = (data.get('instagram_login') or '').strip()
+    instagram_password = data.get('instagram_password') or ''
+    if not instagram_login or not instagram_password:
+        return jsonify({'error': 'Instagram login and password are required.'}), 400
+
+    update_user_instagram_credentials(current_user, instagram_login, instagram_password)
+    return jsonify({'message': 'Instagram credentials updated. Stored Instagram cookies were cleared.'}), 200
+
+
+@app.route('/api/account/instagram-credentials', methods=['DELETE'])
+@jwt_required()
+def account_delete_instagram_credentials():
+    current_user = get_jwt_identity()
+    update_user_instagram_credentials(current_user, None, None)
+    return jsonify({'message': 'Instagram credentials deleted and stored cookies cleared.'}), 200
 
 
 @app.route('/submit-form', methods=['POST'])
@@ -524,6 +657,8 @@ def process_data_endpoint():
         if raw_number_of_posts in (None, ""):
             return jsonify({'error': 'Number of posts is required.'}), 400
 
+        headless_session_only = bool(params.get("headless_session_only"))
+
         try:
             number_of_posts = int(raw_number_of_posts)
         except (TypeError, ValueError):
@@ -555,7 +690,16 @@ def process_data_endpoint():
             target_page,
             number_of_posts,
             existing_post_hrefs=existing_post_hrefs,
+            app_username=current_user,
+            headless_session_only=headless_session_only,
         )
+        if extraction_result.get('aborted_reason'):
+            return jsonify(
+                {
+                    'error': extraction_result['aborted_reason'],
+                    'result': extraction_result,
+                }
+            ), 409
         if extraction_result.get('new_posts_found', 0) == 0:
             return jsonify(
                 {
