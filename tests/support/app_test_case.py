@@ -17,9 +17,21 @@ class AppTestCase(unittest.TestCase):
         app_module.logger.setLevel(logging.ERROR)
 
     def setUp(self):
+        self.app = app_module.app
+        self.app.config["TESTING"] = True
+        app_module.logger.setLevel(logging.ERROR)
         self.client = self.app.test_client()
         self.access_csrf_token = None
         self.refresh_csrf_token = None
+        app_module.clear_rate_limit_state()
+        self.app.config["RATE_LIMIT_LOGIN_MAX_ATTEMPTS"] = 10
+        self.app.config["RATE_LIMIT_LOGIN_WINDOW_SECONDS"] = 60
+        self.app.config["RATE_LIMIT_PROCESS_DATA_MAX_ATTEMPTS"] = 2
+        self.app.config["RATE_LIMIT_PROCESS_DATA_WINDOW_SECONDS"] = 300
+        self.app.config["RATE_LIMIT_ENRICH_COMMENTS_MAX_ATTEMPTS"] = 3
+        self.app.config["RATE_LIMIT_ENRICH_COMMENTS_WINDOW_SECONDS"] = 300
+        self.app.config["RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS"] = 60
+        self.app.config["RATE_LIMIT_ANALYSIS_WINDOW_SECONDS"] = 60
 
     def set_access_cookie(self, identity="alice"):
         with self.app.app_context():

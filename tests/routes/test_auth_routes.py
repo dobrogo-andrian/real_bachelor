@@ -6,9 +6,71 @@ from flask_jwt_extended import create_access_token
 from werkzeug.security import generate_password_hash
 
 from tests.support.app_test_case import AppTestCase, app_module
+from tests.support.app_test_loader import load_app_module_with_env
 
 
 class AuthRouteTests(AppTestCase):
+    def test_runtime_security_config_uses_safe_environment_defaults(self):
+        development_module = load_app_module_with_env(
+            {
+                "APP_ENV": "development",
+                "DEBUG": None,
+                "JWT_COOKIE_SECURE": None,
+                "JWT_COOKIE_SAMESITE": None,
+            }
+        )
+        self.assertEqual(development_module.app.config["APP_ENV"], "development")
+        self.assertTrue(development_module.app.config["DEBUG"])
+        self.assertFalse(development_module.app.config["JWT_COOKIE_SECURE"])
+        self.assertEqual(development_module.app.config["JWT_COOKIE_SAMESITE"], "Lax")
+
+        production_module = load_app_module_with_env(
+            {
+                "APP_ENV": "production",
+                "DEBUG": None,
+                "JWT_COOKIE_SECURE": None,
+                "JWT_COOKIE_SAMESITE": None,
+            }
+        )
+        self.assertEqual(production_module.app.config["APP_ENV"], "production")
+        self.assertFalse(production_module.app.config["DEBUG"])
+        self.assertTrue(production_module.app.config["JWT_COOKIE_SECURE"])
+        self.assertEqual(production_module.app.config["JWT_COOKIE_SAMESITE"], "Lax")
+
+    def test_login_route_applies_cookie_flags_for_each_environment(self):
+        password_hash = generate_password_hash("secret", method="scrypt")
+        development_module = load_app_module_with_env(
+            {
+                "APP_ENV": "development",
+                "DEBUG": None,
+                "JWT_COOKIE_SECURE": None,
+                "JWT_COOKIE_SAMESITE": None,
+            }
+        )
+        development_client = development_module.app.test_client()
+        with patch.object(development_module, "fetch_user", return_value=(password_hash,)):
+            response = development_client.post("/login", json={"username": "alice", "password": "secret"})
+
+        set_cookie_headers = " ".join(response.headers.getlist("Set-Cookie"))
+        self.assertIn("SameSite=Lax", set_cookie_headers)
+        self.assertNotIn("Secure;", set_cookie_headers)
+
+        production_module = load_app_module_with_env(
+            {
+                "APP_ENV": "production",
+                "DEBUG": None,
+                "JWT_COOKIE_SECURE": None,
+                "JWT_COOKIE_SAMESITE": None,
+            }
+        )
+        production_client = production_module.app.test_client()
+        with patch.object(production_module, "fetch_user", return_value=(password_hash,)):
+            production_response = production_client.post("/login", json={"username": "alice", "password": "secret"})
+
+        production_cookie_headers = " ".join(production_response.headers.getlist("Set-Cookie"))
+        self.assertIn("SameSite=Lax", production_cookie_headers)
+        self.assertIn("Secure;", production_cookie_headers)
+
     def test_login_route(self):
         password_hash = generate_password_hash("secret", method="scrypt")
         scenarios = [
@@ -64,9 +126,9 @@ class AuthRouteTests(AppTestCase):
                 "path": "/login",
                 "fetch_user_result": None,
                 "payload": {"username": "alice", "password": "secret"},
-                "expected_status": 404,
+                "expected_status": 401,
                 "assertions": lambda response: self.assertEqual(
-                    response.get_json()["error"], "User not found"
+                    response.get_json()["error"], "Invalid username or password"
                 ),
             },
         ]
@@ -75,6 +137,7 @@ class AuthRouteTests(AppTestCase):
             with self.subTest(scenario["name"]), patch.object(
                 app_module, "fetch_user", return_value=scenario["fetch_user_result"]
             ), patch.object(app_module, "update_user_password_hash") as mocked_upgrade:
+                app_module.clear_rate_limit_state()
                 if scenario["method"] == "GET":
                     response = self.client.get(scenario["path"])
                 else:
@@ -87,6 +150,65 @@ class AuthRouteTests(AppTestCase):
                     self.assertTrue(mocked_upgrade.call_args.args[1].startswith("scrypt:"))
                 else:
                     mocked_upgrade.assert_not_called()
+
+    def test_login_route_uses_same_failure_behavior_for_unknown_user_and_bad_password(self):
+        password_hash = generate_password_hash("secret", method="scrypt")
+
+        with patch.object(app_module, "fetch_user", return_value=(password_hash,)):
+            bad_password_response = self.client.post("/login", json={"username": "alice", "password": "wrong"})
+
+        app_module.clear_rate_limit_state()
+
+        with patch.object(app_module, "fetch_user", return_value=None):
+            unknown_user_response = self.client.post("/login", json={"username": "missing-user", "password": "secret"})
+
+        self.assertEqual(bad_password_response.status_code, 401)
+        self.assertEqual(unknown_user_response.status_code, 401)
+        self.assertEqual(
+            bad_password_response.get_json()["error"],
+            "Invalid username or password",
+        )
+        self.assertEqual(
+            unknown_user_response.get_json()["error"],
+            "Invalid username or password",
+        )
+
+    def test_login_route_rate_limits_repeated_attempts(self):
+        self.app.config["RATE_LIMIT_LOGIN_MAX_ATTEMPTS"] = 2
+        self.app.config["RATE_LIMIT_LOGIN_WINDOW_SECONDS"] = 60
+        password_hash = generate_password_hash("secret", method="scrypt")
+
+        with patch.object(app_module, "fetch_user", return_value=(password_hash,)):
+            first_response = self.client.post("/login", json={"username": "alice", "password": "wrong"})
+            second_response = self.client.post("/login", json={"username": "alice", "password": "wrong"})
+            limited_response = self.client.post("/login", json={"username": "alice", "password": "wrong"})
+
+        self.assertEqual(first_response.status_code, 401)
+        self.assertEqual(second_response.status_code, 401)
+        self.assertEqual(limited_response.status_code, 429)
+        self.assertEqual(
+            limited_response.get_json()["error"],
+            "Too many login requests. Please retry later.",
+        )
+        self.assertIn("Retry-After", limited_response.headers)
+
+    def test_cors_is_restricted_to_explicit_allowed_origins(self):
+        cors_module = load_app_module_with_env(
+            {
+                "CORS_ALLOWED_ORIGINS": "http://localhost:5000,https://trusted.example",
+            }
+        )
+        cors_client = cors_module.app.test_client()
+
+        allowed_response = cors_client.get("/login", headers={"Origin": "https://trusted.example"})
+        disallowed_response = cors_client.get("/login", headers={"Origin": "https://evil.example"})
+
+        self.assertEqual(
+            allowed_response.headers.get("Access-Control-Allow-Origin"),
+            "https://trusted.example",
+        )
+        self.assertEqual(allowed_response.headers.get("Access-Control-Allow-Credentials"), "true")
+        self.assertIsNone(disallowed_response.headers.get("Access-Control-Allow-Origin"))
 
     def test_refresh_route(self):
         scenarios = [

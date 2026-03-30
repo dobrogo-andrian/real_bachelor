@@ -71,6 +71,7 @@ class ProcessFlowRouteTests(AppTestCase):
         for scenario in scenarios:
             with self.subTest(scenario["name"]):
                 self.client = self.app.test_client()
+                app_module.clear_rate_limit_state()
                 self.set_access_cookie("alice")
                 with patch.object(
                     app_module,
@@ -166,6 +167,7 @@ class ProcessFlowRouteTests(AppTestCase):
         for scenario in scenarios:
             with self.subTest(scenario["name"]):
                 self.client = self.app.test_client()
+                app_module.clear_rate_limit_state()
                 self.set_access_cookie("alice")
                 with patch.object(
                     app_module,
@@ -204,6 +206,44 @@ class ProcessFlowRouteTests(AppTestCase):
         self.assertEqual(response.get_json()["error"], "Missing CSRF token")
         self.assertEqual(response.get_json()["action"], "logout")
 
+    def test_process_data_endpoint_rate_limits_repeated_runs(self):
+        self.app.config["RATE_LIMIT_PROCESS_DATA_MAX_ATTEMPTS"] = 1
+        self.app.config["RATE_LIMIT_PROCESS_DATA_WINDOW_SECONDS"] = 300
+        self.set_access_cookie("alice")
+
+        with patch.object(
+            app_module,
+            "fetch_user_instagram_credentials",
+            return_value={"instagram_login": "insta", "instagram_password": "secret"},
+        ), patch.object(
+            app_module, "fetch_existing_post_hrefs", return_value=["href-1"]
+        ), patch.object(
+            app_module,
+            "extract_data",
+            return_value={"new_posts_found": 1, "posts_loaded": 1, "comments_collected": 2, "saved_files": ["one.csv"]},
+        ) as mocked_extract, patch.object(
+            app_module, "load_to_db", return_value={"rows_loaded": 2, "files_processed": 1}
+        ) as mocked_load:
+            first_response = self.client.post(
+                "/process-data",
+                json={"params": {"param1": "arthaslav", "param2": "3"}},
+                headers=self.make_json_headers(csrf="access"),
+            )
+            limited_response = self.client.post(
+                "/process-data",
+                json={"params": {"param1": "arthaslav", "param2": "3"}},
+                headers=self.make_json_headers(csrf="access"),
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(limited_response.status_code, 429)
+        self.assertEqual(
+            limited_response.get_json()["error"],
+            "Too many process-data requests. Please retry later.",
+        )
+        self.assertEqual(mocked_extract.call_count, 1)
+        self.assertEqual(mocked_load.call_count, 1)
+
     def test_enrich_comments_endpoint(self):
         scenarios = [
             {
@@ -220,13 +260,16 @@ class ProcessFlowRouteTests(AppTestCase):
                 "name": "enrich_comments_handles_backend_failure",
                 "side_effect": RuntimeError("boom"),
                 "expected_status": 500,
-                "assertions": lambda response: self.assertEqual(response.get_json()["error"], "boom"),
+                "assertions": lambda response: self.assertEqual(
+                    response.get_json()["error"], "Enrich-comments request failed."
+                ),
             },
         ]
 
         for scenario in scenarios:
             with self.subTest(scenario["name"]):
                 self.client = self.app.test_client()
+                app_module.clear_rate_limit_state()
                 self.set_access_cookie("alice")
                 enrich_patch = patch.object(app_module, "enrich_comments", side_effect=scenario["side_effect"])
                 if scenario["expected_status"] == 500:
@@ -248,6 +291,31 @@ class ProcessFlowRouteTests(AppTestCase):
                 self.assertEqual(response.status_code, scenario["expected_status"])
                 scenario["assertions"](response)
 
+    def test_enrich_comments_endpoint_rate_limits_repeated_runs(self):
+        self.app.config["RATE_LIMIT_ENRICH_COMMENTS_MAX_ATTEMPTS"] = 1
+        self.app.config["RATE_LIMIT_ENRICH_COMMENTS_WINDOW_SECONDS"] = 300
+        self.set_access_cookie("alice")
+
+        with patch.object(app_module, "enrich_comments", return_value={"processed": 3}) as mocked_enrich:
+            first_response = self.client.post(
+                "/enrich-comments",
+                json={"mode": "page_name", "page_name": "arthaslav"},
+                headers=self.make_json_headers(csrf="access"),
+            )
+            limited_response = self.client.post(
+                "/enrich-comments",
+                json={"mode": "page_name", "page_name": "arthaslav"},
+                headers=self.make_json_headers(csrf="access"),
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(limited_response.status_code, 429)
+        self.assertEqual(
+            limited_response.get_json()["error"],
+            "Too many enrich-comments requests. Please retry later.",
+        )
+        self.assertEqual(mocked_enrich.call_count, 1)
+
     def test_page_analysis_endpoint(self):
         scenarios = [
             {
@@ -267,7 +335,7 @@ class ProcessFlowRouteTests(AppTestCase):
                 "side_effect": RuntimeError("analysis failed"),
                 "expected_status": 500,
                 "assertions": lambda response: self.assertEqual(
-                    response.get_json()["error"], "analysis failed"
+                    response.get_json()["error"], "Page-analysis request failed."
                 ),
             },
         ]
@@ -275,6 +343,7 @@ class ProcessFlowRouteTests(AppTestCase):
         for scenario in scenarios:
             with self.subTest(scenario["name"]):
                 self.client = self.app.test_client()
+                app_module.clear_rate_limit_state()
                 self.set_access_cookie("alice")
                 analysis_patch = patch.object(app_module, "build_page_analysis", side_effect=scenario["side_effect"])
                 if scenario["expected_status"] == 500:
@@ -296,6 +365,41 @@ class ProcessFlowRouteTests(AppTestCase):
                 self.assertEqual(response.status_code, scenario["expected_status"])
                 scenario["assertions"](response)
 
+    def test_analysis_endpoints_share_rate_limit_budget(self):
+        self.app.config["RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS"] = 1
+        self.app.config["RATE_LIMIT_ANALYSIS_WINDOW_SECONDS"] = 60
+        self.set_access_cookie("alice")
+
+        with patch.object(
+            app_module,
+            "build_page_analysis",
+            return_value={"summary": {"total_comments": 4, "distinct_posts": 2}},
+        ) as mocked_page_analysis, patch.object(
+            app_module, "fetch_enriched_comment_rows", return_value=[{"CommentHash": "1"}]
+        ) as mocked_rows, patch.object(
+            app_module, "build_analysis_from_rows", return_value={"summary": {"total_comments": 1}}
+        ) as mocked_build:
+            first_response = self.client.post(
+                "/page-analysis",
+                json={"selection_type": "page_id", "selection_value": "arthaslav"},
+                headers=self.make_json_headers(csrf="access"),
+            )
+            limited_response = self.client.post(
+                "/api/advanced-analysis/analyze",
+                json={"page_ids": ["arthaslav"]},
+                headers=self.make_json_headers(csrf="access"),
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(limited_response.status_code, 429)
+        self.assertEqual(
+            limited_response.get_json()["error"],
+            "Too many analysis requests. Please retry later.",
+        )
+        mocked_page_analysis.assert_called_once()
+        mocked_rows.assert_not_called()
+        mocked_build.assert_not_called()
+
     def test_advanced_analysis_preview(self):
         scenarios = [
             {
@@ -315,7 +419,7 @@ class ProcessFlowRouteTests(AppTestCase):
                 "analysis_result": {},
                 "expected_status": 500,
                 "assertions": lambda response: self.assertEqual(
-                    response.get_json()["error"], "preview failed"
+                    response.get_json()["error"], "Failed to load advanced analysis preview."
                 ),
             },
         ]
@@ -323,6 +427,7 @@ class ProcessFlowRouteTests(AppTestCase):
         for scenario in scenarios:
             with self.subTest(scenario["name"]):
                 self.client = self.app.test_client()
+                app_module.clear_rate_limit_state()
                 self.set_access_cookie("alice")
                 if isinstance(scenario["preview_result"], Exception):
                     preview_patch = patch.object(
@@ -371,7 +476,7 @@ class ProcessFlowRouteTests(AppTestCase):
                 "analysis_result": {},
                 "expected_status": 500,
                 "assertions": lambda response: self.assertEqual(
-                    response.get_json()["error"], "rows failed"
+                    response.get_json()["error"], "Failed to build advanced analysis."
                 ),
             },
         ]
@@ -408,3 +513,25 @@ class ProcessFlowRouteTests(AppTestCase):
 
                 self.assertEqual(response.status_code, scenario["expected_status"])
                 scenario["assertions"](response)
+
+    def test_process_data_endpoint_hides_internal_exception_details(self):
+        self.set_access_cookie("alice")
+
+        with patch.object(
+            app_module,
+            "fetch_user_instagram_credentials",
+            return_value={"instagram_login": "insta", "instagram_password": "secret"},
+        ), patch.object(
+            app_module, "fetch_existing_post_hrefs", return_value=["href-1"]
+        ), patch.object(
+            app_module, "extract_data", side_effect=RuntimeError("database password leaked")
+        ), patch.object(app_module.logger, "exception") as mocked_exception:
+            response = self.client.post(
+                "/process-data",
+                json={"params": {"param1": "arthaslav", "param2": "3"}},
+                headers=self.make_json_headers(csrf="access"),
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()["error"], "Process-data request failed.")
+        mocked_exception.assert_called_once()

@@ -105,3 +105,29 @@ def load_app_module():
             return importlib.import_module("app")
     finally:
         logging.disable(previous_disable_level)
+
+
+def load_app_module_with_env(env_overrides):
+    tracked_keys = set(env_overrides) | {
+        "APP_ENV",
+        "FLASK_ENV",
+        "DEBUG",
+        "JWT_COOKIE_SECURE",
+        "JWT_COOKIE_SAMESITE",
+        "CORS_ALLOWED_ORIGINS",
+    }
+    previous_values = {key: os.environ.get(key) for key in tracked_keys}
+
+    try:
+        for key, value in env_overrides.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        return load_app_module()
+    finally:
+        for key, value in previous_values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value

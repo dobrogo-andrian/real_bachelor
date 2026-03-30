@@ -128,13 +128,11 @@ try {
 
     // Redirect to the original page (nextUrl)
     window.location.href = nextUrl;
-  } else if (response.status === 401 || response.status === 404) {
+  } else if (response.status === 401) {
     // Handle login errors
+    const data = await response.json();
     const errorMsg = document.getElementById('error-msg');
-    errorMsg.textContent =
-      response.status === 401
-        ? 'Invalid username or password.'
-        : 'User not found.';
+    errorMsg.textContent = data.error || 'Invalid username or password.';
     errorMsg.style.display = 'block'; // Show the error message
   } else {
     // Handle other errors

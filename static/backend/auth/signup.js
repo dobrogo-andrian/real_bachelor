@@ -22,7 +22,7 @@ document.getElementById('signup-form').addEventListener('submit', async function
   }
 
   try {
-    const response = await fetch('http://localhost:5000/signup', {
+    const response = await fetch('/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -40,7 +40,7 @@ document.getElementById('signup-form').addEventListener('submit', async function
       alert(data.message || 'Sign up successful!');
       window.location.href = '/login'; // або інша сторінка
     } else {
-      errorMsg.textContent = data.message || 'Sign up failed.';
+      errorMsg.textContent = data.error || data.message || 'Sign up failed.';
       errorMsg.style.display = 'block';
     }
   } catch (error) {

@@ -2,12 +2,16 @@ import os
 import logging
 import hashlib
 import hmac
+import threading
+import time
+from collections import defaultdict, deque
+from functools import wraps
 
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from env_config import load_dotenv
+from env_config import load_dotenv, get_app_environment, get_bool_env, get_cookie_samesite, get_int_env, get_list_env
 
 load_dotenv()
 
@@ -41,22 +45,50 @@ from flask_jwt_extended import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__, static_folder=None)
+app_environment = get_app_environment()
+is_production = app_environment == 'production'
+debug_enabled = get_bool_env('DEBUG', default=not is_production)
+jwt_cookie_secure = get_bool_env('JWT_COOKIE_SECURE', default=is_production)
+jwt_cookie_samesite = get_cookie_samesite(default='Lax')
+cors_allowed_origins = get_list_env(
+    'CORS_ALLOWED_ORIGINS',
+    default=['http://localhost:5000', 'http://127.0.0.1:5000'],
+)
+
 app.config['JWT_SECRET_KEY'] = os.environ['JWT_SECRET_KEY']
+app.config['APP_ENV'] = app_environment
+app.config['DEBUG'] = debug_enabled
 app.config['JWT_TOKEN_LOCATION'] = ['cookies']
-app.config['JWT_COOKIE_SECURE'] = False
+app.config['JWT_COOKIE_SECURE'] = jwt_cookie_secure
+app.config['JWT_COOKIE_SAMESITE'] = jwt_cookie_samesite
+app.config['CORS_ALLOWED_ORIGINS'] = cors_allowed_origins
 app.config['JWT_ACCESS_COOKIE_PATH'] = '/'
 app.config['JWT_REFRESH_COOKIE_PATH'] = '/refresh'
 app.config['JWT_COOKIE_CSRF_PROTECT'] = True
-logging.basicConfig(level=logging.DEBUG)
+app.config['RATE_LIMIT_LOGIN_MAX_ATTEMPTS'] = get_int_env('RATE_LIMIT_LOGIN_MAX_ATTEMPTS', 10)
+app.config['RATE_LIMIT_LOGIN_WINDOW_SECONDS'] = get_int_env('RATE_LIMIT_LOGIN_WINDOW_SECONDS', 60)
+app.config['RATE_LIMIT_PROCESS_DATA_MAX_ATTEMPTS'] = get_int_env('RATE_LIMIT_PROCESS_DATA_MAX_ATTEMPTS', 10)
+app.config['RATE_LIMIT_PROCESS_DATA_WINDOW_SECONDS'] = get_int_env('RATE_LIMIT_PROCESS_DATA_WINDOW_SECONDS', 60)
+app.config['RATE_LIMIT_ENRICH_COMMENTS_MAX_ATTEMPTS'] = get_int_env('RATE_LIMIT_ENRICH_COMMENTS_MAX_ATTEMPTS', 10)
+app.config['RATE_LIMIT_ENRICH_COMMENTS_WINDOW_SECONDS'] = get_int_env('RATE_LIMIT_ENRICH_COMMENTS_WINDOW_SECONDS', 60)
+app.config['RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS'] = get_int_env('RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS', 60)
+app.config['RATE_LIMIT_ANALYSIS_WINDOW_SECONDS'] = get_int_env('RATE_LIMIT_ANALYSIS_WINDOW_SECONDS', 60)
+logging.basicConfig(level=logging.DEBUG if debug_enabled else logging.INFO)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.DEBUG if debug_enabled else logging.INFO)
 logger.debug("Application started.")
 
 logging.getLogger("selenium").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
-CORS(app)
+CORS(
+    app,
+    resources={r"/*": {"origins": cors_allowed_origins}},
+    supports_credentials=True,
+)
 jwt = JWTManager(app)
+rate_limit_storage = defaultdict(deque)
+rate_limit_lock = threading.Lock()
 
 
 def _is_csrf_error(error):
@@ -95,12 +127,95 @@ def verify_application_password(username, provided_password):
     return password_valid
 
 
+DUMMY_PASSWORD_HASH = hash_user_password('not-the-user-password')
+
+
 def mask_secret_for_hint(secret):
     if not secret:
         return "Not configured"
     if len(secret) <= 2:
         return "*" * len(secret)
     return f"{secret[0]}{'*' * (len(secret) - 2)}{secret[-1]}"
+
+
+def _get_request_client_identifier():
+    forwarded_for = request.headers.get('X-Forwarded-For', '')
+    if forwarded_for:
+        client_ip = forwarded_for.split(',', 1)[0].strip()
+        if client_ip:
+            return client_ip
+    return request.remote_addr or 'unknown'
+
+
+def clear_rate_limit_state():
+    with rate_limit_lock:
+        rate_limit_storage.clear()
+
+
+def _consume_rate_limit(bucket_name, bucket_key, max_attempts, window_seconds):
+    now = time.time()
+    window_start = now - window_seconds
+    storage_key = (bucket_name, bucket_key)
+
+    with rate_limit_lock:
+        attempts = rate_limit_storage[storage_key]
+        while attempts and attempts[0] <= window_start:
+            attempts.popleft()
+
+        if len(attempts) >= max_attempts:
+            retry_after = max(1, int(attempts[0] + window_seconds - now))
+            return retry_after
+
+        attempts.append(now)
+        return None
+
+
+def _rate_limit_exceeded_response(scope, retry_after):
+    response = jsonify(
+        {
+            'error': f'Too many {scope} requests. Please retry later.',
+            'retry_after_seconds': retry_after,
+        }
+    )
+    response.headers['Retry-After'] = str(retry_after)
+    return response, 429
+
+
+def _internal_error_response(client_message):
+    return jsonify({'error': client_message}), 500
+
+
+def limit_requests(bucket_name, max_attempts_config_key, window_seconds_config_key, key_builder, scope):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped(*args, **kwargs):
+            bucket_key = key_builder()
+            retry_after = _consume_rate_limit(
+                bucket_name,
+                bucket_key,
+                app.config[max_attempts_config_key],
+                app.config[window_seconds_config_key],
+            )
+            if retry_after is not None:
+                logger.warning(
+                    "Rate limit exceeded: bucket=%s key=%s retry_after=%s",
+                    bucket_name,
+                    bucket_key,
+                    retry_after,
+                )
+                return _rate_limit_exceeded_response(scope, retry_after)
+            return view_func(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+def _build_login_rate_limit_key():
+    data = request.get_json(silent=True) or {}
+    username = str(data.get('username', '')).strip().lower() or 'anonymous'
+    client_id = _get_request_client_identifier()
+    return f'{client_id}:{username}'
 
 
 @app.route('/static/<path:filename>')
@@ -110,6 +225,8 @@ def static_proxy(filename):
 
 @app.before_request
 def log_request():
+    if request.path.startswith('/static/') or request.path == '/favicon.ico':
+        return
     logger.debug(f"Incoming request: {request.method} {request.url}")
 
 
@@ -137,29 +254,37 @@ def login():
         return response
 
     elif request.method == 'POST':
+        retry_after = _consume_rate_limit(
+            'login',
+            _build_login_rate_limit_key(),
+            app.config['RATE_LIMIT_LOGIN_MAX_ATTEMPTS'],
+            app.config['RATE_LIMIT_LOGIN_WINDOW_SECONDS'],
+        )
+        if retry_after is not None:
+            return _rate_limit_exceeded_response('login', retry_after)
+
         data = request.json
         username = data['username']
         password = data['password']
 
         user = fetch_user(username)
+        if not user:
+            verify_user_password(DUMMY_PASSWORD_HASH, password)
+            return jsonify({'error': 'Invalid username or password'}), 401
 
-        if user:
-            stored_password_hash = user[0]
-            password_valid, upgraded_password_hash = verify_user_password(stored_password_hash, password)
-            if password_valid:
-                if upgraded_password_hash:
-                    update_user_password_hash(username, upgraded_password_hash)
-                access_token = create_access_token(identity=username)
-                refresh_token = create_refresh_token(identity=username)
+        stored_password_hash = user[0]
+        password_valid, upgraded_password_hash = verify_user_password(stored_password_hash, password)
+        if password_valid:
+            if upgraded_password_hash:
+                update_user_password_hash(username, upgraded_password_hash)
+            access_token = create_access_token(identity=username)
+            refresh_token = create_refresh_token(identity=username)
 
-                response = jsonify({'message': 'Login successful'})
-                set_access_cookies(response, access_token)
-                set_refresh_cookies(response, refresh_token)
-                return response, 200
-            else:
-                return jsonify({'error': 'Invalid username or password'}), 401
-        else:
-            return jsonify({'error': 'User not found'}), 404
+            response = jsonify({'message': 'Login successful'})
+            set_access_cookies(response, access_token)
+            set_refresh_cookies(response, refresh_token)
+            return response, 200
+        return jsonify({'error': 'Invalid username or password'}), 401
     return None
 
 
@@ -327,8 +452,8 @@ def explorer():
     try:
         page_dimensions = fetch_distinct_comment_dimensions()
     except Exception as exc:
-        page_loading_error = str(exc)
         logger.exception("Failed to load distinct page dimensions for explorer.")
+        page_loading_error = "Could not load page lists right now."
 
     return render_template(
         'explorer.html',
@@ -356,8 +481,8 @@ def advanced_analysis():
     try:
         advanced_dimensions = fetch_advanced_comment_dimensions()
     except Exception as exc:
-        page_loading_error = str(exc)
         logger.exception("Failed to load advanced analysis dimensions.")
+        page_loading_error = "Could not load advanced-analysis filters right now."
 
     return render_template(
         'advanced_analysis.html',
@@ -369,6 +494,13 @@ def advanced_analysis():
 
 @app.route('/api/advanced-analysis/preview', methods=['POST'])
 @jwt_required()
+@limit_requests(
+    bucket_name='analysis',
+    max_attempts_config_key='RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS',
+    window_seconds_config_key='RATE_LIMIT_ANALYSIS_WINDOW_SECONDS',
+    key_builder=lambda: get_jwt_identity(),
+    scope='analysis',
+)
 def advanced_analysis_preview():
     payload = request.get_json(silent=True) or {}
     logger.debug("Advanced analysis preview payload: %s", payload)
@@ -385,11 +517,18 @@ def advanced_analysis_preview():
         return jsonify(preview), 200
     except Exception as exc:
         logger.exception("Failed to fetch advanced analysis preview.")
-        return jsonify({"error": str(exc)}), 500
+        return _internal_error_response("Failed to load advanced analysis preview.")
 
 
 @app.route('/api/advanced-analysis/analyze', methods=['POST'])
 @jwt_required()
+@limit_requests(
+    bucket_name='analysis',
+    max_attempts_config_key='RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS',
+    window_seconds_config_key='RATE_LIMIT_ANALYSIS_WINDOW_SECONDS',
+    key_builder=lambda: get_jwt_identity(),
+    scope='analysis',
+)
 def advanced_analysis_analyze():
     payload = request.get_json(silent=True) or {}
     logger.debug("Advanced analysis chart payload: %s", payload)
@@ -404,7 +543,7 @@ def advanced_analysis_analyze():
         return jsonify({"analysis": analysis}), 200
     except Exception as exc:
         logger.exception("Failed to build advanced analysis charts.")
-        return jsonify({"error": str(exc)}), 500
+        return _internal_error_response("Failed to build advanced analysis.")
 
 
 @app.route('/faq')
@@ -640,6 +779,13 @@ def signup():
 
 @app.route('/process-data', methods=['POST'])
 @jwt_required()
+@limit_requests(
+    bucket_name='process-data',
+    max_attempts_config_key='RATE_LIMIT_PROCESS_DATA_MAX_ATTEMPTS',
+    window_seconds_config_key='RATE_LIMIT_PROCESS_DATA_WINDOW_SECONDS',
+    key_builder=lambda: get_jwt_identity(),
+    scope='process-data',
+)
 def process_data_endpoint():
     try:
         current_user = get_jwt_identity()
@@ -741,13 +887,20 @@ def process_data_endpoint():
                 }
             }
         ), 200
-    except Exception as e:
+    except Exception:
         logger.exception("process-data failed")
-        return jsonify({'error': str(e)}), 500
+        return _internal_error_response('Process-data request failed.')
 
 
 @app.route('/enrich-comments', methods=['POST'])
 @jwt_required()
+@limit_requests(
+    bucket_name='enrich-comments',
+    max_attempts_config_key='RATE_LIMIT_ENRICH_COMMENTS_MAX_ATTEMPTS',
+    window_seconds_config_key='RATE_LIMIT_ENRICH_COMMENTS_WINDOW_SECONDS',
+    key_builder=lambda: get_jwt_identity(),
+    scope='enrich-comments',
+)
 def enrich_comments_endpoint():
     try:
         data = request.json or {}
@@ -768,13 +921,20 @@ def enrich_comments_endpoint():
             result.get('page_id'),
         )
         return jsonify({'success': True, 'result': result}), 200
-    except Exception as e:
+    except Exception:
         logger.exception("enrich-comments failed")
-        return jsonify({'error': str(e)}), 500
+        return _internal_error_response('Enrich-comments request failed.')
 
 
 @app.route('/page-analysis', methods=['POST'])
 @jwt_required()
+@limit_requests(
+    bucket_name='analysis',
+    max_attempts_config_key='RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS',
+    window_seconds_config_key='RATE_LIMIT_ANALYSIS_WINDOW_SECONDS',
+    key_builder=lambda: get_jwt_identity(),
+    scope='analysis',
+)
 def page_analysis_endpoint():
     try:
         data = request.json or {}
@@ -789,9 +949,9 @@ def page_analysis_endpoint():
             result.get('summary', {}).get('distinct_posts') if result.get('summary') else 0,
         )
         return jsonify({'success': True, 'result': result}), 200
-    except Exception as e:
+    except Exception:
         logger.exception("page-analysis failed")
-        return jsonify({'error': str(e)}), 500
+        return _internal_error_response('Page-analysis request failed.')
 
 
 @jwt.invalid_token_loader

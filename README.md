@@ -89,6 +89,10 @@ pip install -r requirements.txt
    - `.env` is loaded automatically on app startup.
    - Set at least `JWT_SECRET_KEY`, `DB_SERVER`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`.
    - Optionally set `COOKIE_SIGNING_SECRET`; if omitted, signed Instagram cookie payloads fall back to `JWT_SECRET_KEY`.
+   - Local development defaults should remain `APP_ENV=development`, `DEBUG=true`, `JWT_COOKIE_SECURE=false`, and `JWT_COOKIE_SAMESITE=Lax` for `http://localhost` or `http://127.0.0.1`.
+   - Production deployments should use `APP_ENV=production`, which defaults to `DEBUG=false` and `JWT_COOKIE_SECURE=true`. Override `JWT_COOKIE_SAMESITE` only if your deployment needs a stricter or cross-site cookie policy.
+   - `CORS_ALLOWED_ORIGINS` should contain a comma-separated list of trusted frontend origins. The default local allowlist is `http://localhost:5000,http://127.0.0.1:5000`.
+   - Abuse-control defaults are configurable through `RATE_LIMIT_*` variables for `/login`, `/process-data`, `/enrich-comments`, and the analysis APIs. The shipped defaults are biased toward avoiding brute-force and bot activity, with looser thresholds for login and analysis than for the heavier processing routes.
 4. Create the SQL Server database and tables from:
    - `ddl/Users.sql`
    - `ddl/Users_AddInstagramCookies.sql` for existing databases that need the new cookie columns

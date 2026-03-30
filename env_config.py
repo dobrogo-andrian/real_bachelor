@@ -32,3 +32,66 @@ def load_dotenv(dotenv_path=None, override=False):
             os.environ[key] = value
 
     return True
+
+
+def get_bool_env(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def get_app_environment():
+    raw_value = os.environ.get("APP_ENV") or os.environ.get("FLASK_ENV") or "development"
+    normalized = raw_value.strip().lower()
+    aliases = {
+        "prod": "production",
+        "development": "development",
+        "dev": "development",
+        "local": "development",
+        "staging": "staging",
+        "test": "test",
+        "testing": "test",
+        "production": "production",
+    }
+    return aliases.get(normalized, normalized or "development")
+
+
+def get_cookie_samesite(default="Lax"):
+    value = os.environ.get("JWT_COOKIE_SAMESITE")
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    options = {
+        "strict": "Strict",
+        "lax": "Lax",
+        "none": "None",
+    }
+    return options.get(normalized, default)
+
+
+def get_int_env(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+
+    try:
+        return int(value.strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def get_list_env(name, default=None):
+    value = os.environ.get(name)
+    if value is None:
+        return list(default or [])
+
+    items = [item.strip() for item in value.split(",")]
+    return [item for item in items if item]

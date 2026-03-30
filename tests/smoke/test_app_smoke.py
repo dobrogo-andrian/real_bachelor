@@ -86,6 +86,6 @@ class AppSmokeTests(AppTestCase):
             advanced_response = self.client.get("/advanced-analysis")
 
         self.assertEqual(explorer_response.status_code, 200)
-        self.assertIn(b"comments lookup failed", explorer_response.data)
+        self.assertIn(b"Could not load page lists right now.", explorer_response.data)
         self.assertEqual(advanced_response.status_code, 200)
-        self.assertIn(b"advanced lookup failed", advanced_response.data)
+        self.assertIn(b"Could not load advanced-analysis filters right now.", advanced_response.data)
