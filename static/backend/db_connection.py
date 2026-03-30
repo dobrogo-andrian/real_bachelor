@@ -1,6 +1,7 @@
 import ctypes
 import hashlib
 import hmac
+import logging
 import os
 import pyodbc
 from flask import jsonify
@@ -10,6 +11,7 @@ from env_config import load_dotenv
 
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 CRYPTPROTECT_UI_FORBIDDEN = 0x01
@@ -242,6 +244,8 @@ def unprotect_secret(ciphertext):
 
 
 def insert_new_user(username, email, password, instagram_login, instagram_password):
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -260,12 +264,16 @@ def insert_new_user(username, email, password, instagram_login, instagram_passwo
         conn.commit()
 
         return jsonify({'message': 'User created successfully', 'redirect': '/login'}), 201
-    except Exception as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        if conn is not None:
+            conn.rollback()
+        logger.exception("Failed to create user account.")
+        return jsonify({'error': 'Sign up failed. Please try again later.'}), 500
     finally:
-        cursor.close()
-        conn.close()
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 
 def _get_cookie_signing_key():

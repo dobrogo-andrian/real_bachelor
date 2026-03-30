@@ -62,6 +62,7 @@ app.config['JWT_TOKEN_LOCATION'] = ['cookies']
 app.config['JWT_COOKIE_SECURE'] = jwt_cookie_secure
 app.config['JWT_COOKIE_SAMESITE'] = jwt_cookie_samesite
 app.config['CORS_ALLOWED_ORIGINS'] = cors_allowed_origins
+app.config['TRUST_PROXY_HEADERS'] = get_bool_env('TRUST_PROXY_HEADERS', default=False)
 app.config['JWT_ACCESS_COOKIE_PATH'] = '/'
 app.config['JWT_REFRESH_COOKIE_PATH'] = '/refresh'
 app.config['JWT_COOKIE_CSRF_PROTECT'] = True
@@ -139,11 +140,12 @@ def mask_secret_for_hint(secret):
 
 
 def _get_request_client_identifier():
-    forwarded_for = request.headers.get('X-Forwarded-For', '')
-    if forwarded_for:
-        client_ip = forwarded_for.split(',', 1)[0].strip()
-        if client_ip:
-            return client_ip
+    if app.config.get('TRUST_PROXY_HEADERS'):
+        forwarded_for = request.headers.get('X-Forwarded-For', '')
+        if forwarded_for:
+            client_ip = forwarded_for.split(',', 1)[0].strip()
+            if client_ip:
+                return client_ip
     return request.remote_addr or 'unknown'
 
 
@@ -999,4 +1001,4 @@ def revoked_token_callback(jwt_header, jwt_payload):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=debug_enabled, port=5000)

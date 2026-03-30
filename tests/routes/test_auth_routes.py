@@ -192,6 +192,30 @@ class AuthRouteTests(AppTestCase):
         )
         self.assertIn("Retry-After", limited_response.headers)
 
+    def test_login_rate_limit_does_not_trust_spoofed_forwarded_for_by_default(self):
+        self.app.config["RATE_LIMIT_LOGIN_MAX_ATTEMPTS"] = 1
+        self.app.config["RATE_LIMIT_LOGIN_WINDOW_SECONDS"] = 60
+        password_hash = generate_password_hash("secret", method="scrypt")
+
+        with patch.object(app_module, "fetch_user", return_value=(password_hash,)):
+            first_response = self.client.post(
+                "/login",
+                json={"username": "alice", "password": "wrong"},
+                headers={"X-Forwarded-For": "1.1.1.1"},
+            )
+            limited_response = self.client.post(
+                "/login",
+                json={"username": "alice", "password": "wrong"},
+                headers={"X-Forwarded-For": "2.2.2.2"},
+            )
+
+        self.assertEqual(first_response.status_code, 401)
+        self.assertEqual(limited_response.status_code, 429)
+        self.assertEqual(
+            limited_response.get_json()["error"],
+            "Too many login requests. Please retry later.",
+        )
+
     def test_cors_is_restricted_to_explicit_allowed_origins(self):
         cors_module = load_app_module_with_env(
             {

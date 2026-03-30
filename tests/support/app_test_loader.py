@@ -115,6 +115,7 @@ def load_app_module_with_env(env_overrides):
         "JWT_COOKIE_SECURE",
         "JWT_COOKIE_SAMESITE",
         "CORS_ALLOWED_ORIGINS",
+        "TRUST_PROXY_HEADERS",
     }
     previous_values = {key: os.environ.get(key) for key in tracked_keys}
 

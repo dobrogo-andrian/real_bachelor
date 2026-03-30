@@ -166,6 +166,23 @@ class DbConnectionTests(unittest.TestCase):
         self.assertEqual(duplicate_status, 409)
         self.assertEqual(duplicate_response.get_json()["error"], "Username or email already exists")
 
+    def test_insert_new_user_hides_internal_errors(self):
+        failing_cursor = FakeCursor(fetchone_values=[None])
+        failing_conn = FakeConnection(failing_cursor)
+
+        with self.flask_app.app_context():
+            with patch.object(db_module, "get_db_connection", return_value=failing_conn), patch.object(
+                db_module, "protect_secret", side_effect=RuntimeError("dpapi failure")
+            ), patch.object(db_module.logger, "exception") as mocked_exception:
+                response, status = db_module.insert_new_user("alice", "a@example.com", "hash", "insta", "secret")
+
+        self.assertEqual(status, 500)
+        self.assertEqual(response.get_json()["error"], "Sign up failed. Please try again later.")
+        self.assertTrue(failing_conn.rollback_called)
+        self.assertTrue(failing_cursor.closed)
+        self.assertTrue(failing_conn.close_called)
+        mocked_exception.assert_called_once()
+
     def test_sign_instagram_cookie_payload(self):
         with patch.dict("os.environ", {"COOKIE_SIGNING_SECRET": "cookie-secret"}, clear=False):
             signature = db_module.sign_instagram_cookie_payload("payload")
