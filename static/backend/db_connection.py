@@ -702,9 +702,9 @@ def fetch_enriched_comment_preview(filters, limit=100):
             where_clauses.append("ISNULL(EC.[CommentLikes], 0) >= ?")
             params.append(int(min_likes))
         if text_search:
-            where_clauses.append("(EC.[Comment] LIKE ? OR EC.[FilteredComment] LIKE ?)")
+            where_clauses.append("EC.[NormalizedComment] LIKE ?")
             like_pattern = f"%{text_search}%"
-            params.extend([like_pattern, like_pattern])
+            params.append(like_pattern)
 
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
@@ -729,11 +729,10 @@ def fetch_enriched_comment_preview(filters, limit=100):
                 [PageID],
                 [PostHref],
                 [PostTime],
-                [Comment],
                 [CommentTime],
                 [CommentLikes],
                 [MainLanguage],
-                [FilteredComment],
+                [NormalizedComment],
                 [Sentiment],
                 [ProcessedTime],
                 [Source]
@@ -818,9 +817,9 @@ def fetch_enriched_comment_rows(filters):
             where_clauses.append("ISNULL(EC.[CommentLikes], 0) >= ?")
             params.append(int(min_likes))
         if text_search:
-            where_clauses.append("(EC.[Comment] LIKE ? OR EC.[FilteredComment] LIKE ?)")
+            where_clauses.append("EC.[NormalizedComment] LIKE ?")
             like_pattern = f"%{text_search}%"
-            params.extend([like_pattern, like_pattern])
+            params.append(like_pattern)
 
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         query = f"""
@@ -830,11 +829,10 @@ def fetch_enriched_comment_rows(filters):
                 [PageID],
                 [PostHref],
                 [PostTime],
-                [Comment],
                 [CommentTime],
                 [CommentLikes],
                 [MainLanguage],
-                [FilteredComment],
+                [NormalizedComment],
                 [Sentiment],
                 [ProcessedTime],
                 [Source]

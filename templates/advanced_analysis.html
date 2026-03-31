@@ -741,7 +741,7 @@ ORDER BY [PostTime] DESC, [CommentTime] DESC;</pre>
                         <td>${escapeHtml(row.Sentiment || '-')}</td>
                         <td>${escapeHtml(row.CommentLikes ?? 0)}</td>
                         <td>${escapeHtml(row.Source || '-')}</td>
-                        <td class="result-comment">${escapeHtml(row.Comment || row.FilteredComment || '')}</td>
+                        <td class="result-comment">${escapeHtml(row.NormalizedComment || '')}</td>
                     </tr>
                 `).join('');
 

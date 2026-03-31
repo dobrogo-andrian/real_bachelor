@@ -2,7 +2,6 @@ import os
 import sys
 import unittest
 from datetime import datetime
-from types import SimpleNamespace
 from unittest.mock import patch
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -18,58 +17,56 @@ class EnrichCommentsTests(unittest.TestCase):
     def test_normalize_unicode(self):
         self.assertEqual(enrich_module.normalize_unicode("Cafe\u0301"), "Caf\u00e9")
 
+    def test_normalize_comment_for_analysis(self):
+        self.assertEqual(
+            "Hello 😡 world",
+            enrich_module.normalize_comment_for_analysis("Hello  😡   world"),
+        )
+
     def test_detect_main_language(self):
         cases = [
-            ("!!!", "symbols_only", None),
-            ("hello", "en", [SimpleNamespace(lang="en", prob=0.9)]),
-            ("bonjour", "unknown", [SimpleNamespace(lang="fr", prob=0.9)]),
-            ("boom", "unknown", RuntimeError("fail")),
+            ("!!!", "symbols_only", "en"),
+            ("\u041f\u0440\u0438\u0432\u0456\u0442, \u0434\u0440\u0443\u0437\u0456", "uk", "uk"),
+            ("\u0435\u0449\u0451 \u0441\u044b\u0440\u044b\u0435", "ru", "ru"),
+            ("hello", "en", "en"),
+            ("bonjour", "other", "other"),
         ]
 
-        for comment, expected, detector_output in cases:
+        for comment, expected, lingua_output in cases:
             with self.subTest(comment=comment):
-                if isinstance(detector_output, Exception):
-                    patcher = patch.object(enrich_module, "detect_langs", side_effect=detector_output)
-                else:
-                    patcher = patch.object(enrich_module, "detect_langs", return_value=detector_output)
-                with patcher:
+                with patch.object(enrich_module, "_detect_with_lingua", return_value=lingua_output):
                     self.assertEqual(enrich_module.detect_main_language(comment), expected)
 
-    def test_filter_comment_by_main_language(self):
-        self.assertEqual(
-            enrich_module.filter_comment_by_main_language("Hello привет wow!", "en"),
-            "Hello wow!",
-        )
-        self.assertEqual(
-            enrich_module.filter_comment_by_main_language("mixed text", "unknown"),
-            "mixed text",
-        )
+        with patch.object(enrich_module, "_detect_with_lingua", side_effect=RuntimeError("fail")):
+            self.assertEqual(enrich_module.detect_main_language("boom"), "other")
 
     def test_load_models(self):
         enrich_module.load_models.cache_clear()
-        created_models = []
+        created_calls = []
 
         def fake_pipeline(*args, **kwargs):
-            created_models.append(kwargs["model"])
-            return f"model:{kwargs['model']}"
+            created_calls.append(kwargs)
+            return "classifier"
 
         with patch.object(enrich_module, "pipeline", side_effect=fake_pipeline):
             first = enrich_module.load_models()
             second = enrich_module.load_models()
 
         self.assertIs(first, second)
-        self.assertEqual(len(created_models), 4)
-        self.assertEqual(first["en"], "model:cardiffnlp/twitter-roberta-base-sentiment")
+        self.assertEqual(len(created_calls), 1)
+        self.assertEqual(first, "classifier")
+        self.assertEqual(created_calls[0]["model"], "cardiffnlp/twitter-xlm-roberta-base-sentiment")
+        self.assertEqual(created_calls[0]["tokenizer"], "cardiffnlp/twitter-xlm-roberta-base-sentiment")
+        self.assertTrue(created_calls[0]["truncation"])
+        self.assertEqual(created_calls[0]["max_length"], 512)
 
     def test_analyze_sentiment(self):
-        models = {
-            "en": lambda text: [{"label": "LABEL_2"}],
-            "ru": lambda text: [{"label": "neutral"}],
-        }
+        positive_classifier = lambda text: [{"label": "LABEL_2"}]
+        neutral_classifier = lambda text: [{"label": "neutral"}]
 
-        self.assertEqual(enrich_module.analyze_sentiment("good", "en", models), "positive")
-        self.assertEqual(enrich_module.analyze_sentiment("ok", "ru", models), "neutral")
-        self.assertEqual(enrich_module.analyze_sentiment("bad", "missing", models), "neutral")
+        self.assertEqual(enrich_module.analyze_sentiment("good", positive_classifier), "positive")
+        self.assertEqual(enrich_module.analyze_sentiment("ok", neutral_classifier), "neutral")
+        self.assertEqual(enrich_module.analyze_sentiment("bad", lambda text: (_ for _ in ()).throw(RuntimeError("fail"))), "neutral")
 
     def test_build_comment_query(self):
         query, params = enrich_module.build_comment_query("delta")
@@ -129,22 +126,22 @@ class EnrichCommentsTests(unittest.TestCase):
 
     def test_enrich_comment(self):
         with patch.object(enrich_module, "detect_main_language", return_value="en"), patch.object(
-            enrich_module, "filter_comment_by_main_language", return_value="Hello"
+            enrich_module, "normalize_comment_for_analysis", return_value="Hello 🔥"
         ), patch.object(enrich_module, "analyze_sentiment", return_value="positive"):
-            enriched = enrich_module.enrich_comment("Hello привет", {"en": object()})
+            enriched = enrich_module.enrich_comment("Hello world", {"en": object()})
 
         with patch.object(enrich_module, "detect_main_language", return_value="fr"), patch.object(
-            enrich_module, "analyze_sentiment", return_value="weird"
-        ):
+            enrich_module, "normalize_comment_for_analysis", return_value="Bonjour"
+        ), patch.object(enrich_module, "analyze_sentiment", return_value="weird"):
             fallback = enrich_module.enrich_comment("Bonjour", {})
 
         self.assertEqual(
             enriched,
-            {"MainLanguage": "en", "FilteredComment": "Hello", "Sentiment": "positive"},
+            {"MainLanguage": "en", "NormalizedComment": "Hello 🔥", "Sentiment": "positive"},
         )
         self.assertEqual(
             fallback,
-            {"MainLanguage": "unknown", "FilteredComment": "Bonjour", "Sentiment": "neutral"},
+            {"MainLanguage": "other", "NormalizedComment": "Bonjour", "Sentiment": "neutral"},
         )
 
     def test_fetch_comment_rows(self):
@@ -182,8 +179,8 @@ class EnrichCommentsTests(unittest.TestCase):
             enrich_module,
             "enrich_comment",
             side_effect=[
-                {"MainLanguage": "en", "FilteredComment": "Hello", "Sentiment": "positive"},
-                {"MainLanguage": "en", "FilteredComment": "World", "Sentiment": "neutral"},
+                {"MainLanguage": "en", "NormalizedComment": "Hello", "Sentiment": "positive"},
+                {"MainLanguage": "en", "NormalizedComment": "World", "Sentiment": "neutral"},
             ],
         ):
             rows = enrich_module.prepare_enriched_rows(comment_rows, {"en": object()}, source="whole_db")
@@ -207,7 +204,7 @@ class EnrichCommentsTests(unittest.TestCase):
             "CommentOrder": 1,
             "CommentLikes": 0,
             "MainLanguage": "en",
-            "FilteredComment": "Hello",
+            "NormalizedComment": "Hello",
             "Sentiment": "positive",
             "ProcessedTime": datetime(2024, 1, 1, 11, 0, 0),
             "Source": "delta",
@@ -238,7 +235,7 @@ class EnrichCommentsTests(unittest.TestCase):
                 [{"CommentHash": "hash-1", "Comment": "Hello"}],
             ],
         ), patch.object(
-            enrich_module, "load_models", return_value={"en": object()}
+            enrich_module, "load_models", return_value=object()
         ), patch.object(
             enrich_module, "prepare_enriched_rows", return_value=[{"CommentHash": "hash-1"}]
         ), patch.object(

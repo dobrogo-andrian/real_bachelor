@@ -329,6 +329,16 @@ def extractor():
     return render_template('extractor.html')
 
 
+@app.route('/api/extractor/page-dimensions')
+@jwt_required()
+def extractor_page_dimensions():
+    try:
+        return jsonify(fetch_distinct_comment_dimensions()), 200
+    except Exception:
+        logger.exception("Failed to load extractor page dimensions.")
+        return _internal_error_response("Failed to load distinct page values.")
+
+
 @app.route('/account')
 @jwt_required()
 def account():

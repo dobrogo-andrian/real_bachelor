@@ -117,11 +117,10 @@ def fetch_enriched_comments_for_page(selection_type, selection_value):
             [PageID],
             [PostHref],
             [PostTime],
-            [Comment],
             [CommentTime],
             [CommentLikes],
             [MainLanguage],
-            [FilteredComment],
+            [NormalizedComment],
             [Sentiment],
             [ProcessedTime],
             [Source]
@@ -215,13 +214,13 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
         post_time = _normalize_datetime(row.get("PostTime"))
         comment_time = _normalize_datetime(row.get("CommentTime"))
         processed_time = _normalize_datetime(row.get("ProcessedTime"))
-        filtered_comment = _normalize_text(row.get("FilteredComment"))
+        normalized_comment = _normalize_text(row.get("NormalizedComment"))
         sentiment = _normalize_text(row.get("Sentiment")).lower() or "unknown"
-        language = _normalize_text(row.get("MainLanguage")).lower() or "unknown"
+        language = _normalize_text(row.get("MainLanguage")).lower() or "other"
 
         row["_post_time_dt"] = post_time
         row["_comment_time_dt"] = comment_time
-        row["_comment_length"] = len(filtered_comment.split()) if filtered_comment else 0
+        row["_comment_length"] = len(normalized_comment.split()) if normalized_comment else 0
         row["_post_key"] = _build_post_key(row.get("PageID"), row.get("PageName"), post_time)
 
         posts[row["_post_key"]].append(row)
@@ -277,7 +276,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
 
         for row in sorted_rows:
             sentiment = _normalize_text(row.get("Sentiment")).lower() or "unknown"
-            language = _normalize_text(row.get("MainLanguage")).lower() or "unknown"
+            language = _normalize_text(row.get("MainLanguage")).lower() or "other"
             post_sentiments[sentiment] += 1
             post_languages[language] += 1
             language_sentiments[language][sentiment] += 1
@@ -296,7 +295,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
             "post_href": post_href,
             "total_comments": len(sorted_rows),
             "positive_share": _safe_percentage(positive_comments, len(sorted_rows)),
-            "top_language": post_languages.most_common(1)[0][0] if post_languages else "unknown",
+            "top_language": post_languages.most_common(1)[0][0] if post_languages else "other",
             "sentiment_counts": {key: post_sentiments.get(key, 0) for key in SENTIMENT_ORDER},
             "sentiment_shares": {
                 key: _safe_percentage(post_sentiments.get(key, 0), len(sorted_rows))
@@ -311,7 +310,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
             total_compared_comments = 0
             total_matches = 0
             for row in comparable_rows:
-                language = _normalize_text(row.get("MainLanguage")).lower() or "unknown"
+                language = _normalize_text(row.get("MainLanguage")).lower() or "other"
                 sentiment = _normalize_text(row.get("Sentiment")).lower() or "unknown"
                 total_compared_comments += 1
                 matches_by_language[language]["total"] += 1
@@ -353,9 +352,9 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
             "post_index": index,
             "post_href": post_href,
             "sentiment": _normalize_text(top_comment.get("Sentiment")).lower() or "unknown",
-            "language": _normalize_text(top_comment.get("MainLanguage")).lower() or "unknown",
+            "language": _normalize_text(top_comment.get("MainLanguage")).lower() or "other",
             "likes": top_comment.get("CommentLikes") or 0,
-            "comment": _normalize_text(top_comment.get("Comment"))[:280],
+            "comment": _normalize_text(top_comment.get("NormalizedComment"))[:280],
         })
 
     language_breakdown = []
@@ -420,7 +419,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
     overall_language_totals = {
         language: stats["total"]
         for language, stats in positivity_by_language.items()
-        if language != "unknown"
+        if language != "other"
     }
     top_languages_for_trends = [
         language
@@ -443,7 +442,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
 
     solidarity_by_language_posts = defaultdict(list)
     for row in solidarity_breakdown:
-        if row["language"] == "unknown":
+        if row["language"] == "other":
             continue
         solidarity_by_language_posts[row["language"]].append({
             "label": f"P{row['post_index']}",
@@ -463,7 +462,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
     solidarity_distribution = []
     solidarity_scores_by_language = defaultdict(list)
     for row in solidarity_breakdown:
-        if row["language"] != "unknown":
+        if row["language"] != "other":
             solidarity_scores_by_language[row["language"]].append(row["match_percent"])
     for language, values in sorted(solidarity_scores_by_language.items()):
         solidarity_distribution.append({
@@ -517,7 +516,7 @@ def build_analysis_from_rows(rows, selection_type=None, selection_value=None, fi
                 "value": _safe_average(values),
             }
             for (language, sentiment), values in sorted(comment_lengths_by_language_sentiment.items())
-            if language != "unknown"
+            if language != "other"
         ],
         "solidarity_distribution_by_language": solidarity_distribution,
         "positivity_trend_overall": positivity_trend,

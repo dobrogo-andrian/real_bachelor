@@ -399,7 +399,6 @@ class DbConnectionTests(unittest.TestCase):
             "page-id",
             "href",
             datetime(2024, 1, 1, 10, 0, 0),
-            "Hello",
             datetime(2024, 1, 1, 10, 1, 0),
             7,
             "en",
@@ -413,8 +412,8 @@ class DbConnectionTests(unittest.TestCase):
             fetchall_values=[[preview_row]],
             description_values=[[], [
                 ("CommentHash",), ("PageName",), ("PageID",), ("PostHref",), ("PostTime",),
-                ("Comment",), ("CommentTime",), ("CommentLikes",), ("MainLanguage",),
-                ("FilteredComment",), ("Sentiment",), ("ProcessedTime",), ("Source",),
+                ("CommentTime",), ("CommentLikes",), ("MainLanguage",),
+                ("NormalizedComment",), ("Sentiment",), ("ProcessedTime",), ("Source",),
             ]],
         )
         conn = FakeConnection(cursor)
@@ -442,7 +441,6 @@ class DbConnectionTests(unittest.TestCase):
             "page-id",
             "href",
             datetime(2024, 1, 1, 10, 0, 0),
-            "Hello",
             datetime(2024, 1, 1, 10, 1, 0),
             7,
             "en",
@@ -455,8 +453,8 @@ class DbConnectionTests(unittest.TestCase):
             fetchall_values=[[row]],
             description_values=[[
                 ("CommentHash",), ("PageName",), ("PageID",), ("PostHref",), ("PostTime",),
-                ("Comment",), ("CommentTime",), ("CommentLikes",), ("MainLanguage",),
-                ("FilteredComment",), ("Sentiment",), ("ProcessedTime",), ("Source",),
+                ("CommentTime",), ("CommentLikes",), ("MainLanguage",),
+                ("NormalizedComment",), ("Sentiment",), ("ProcessedTime",), ("Source",),
             ]],
         )
         conn = FakeConnection(cursor)

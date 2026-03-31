@@ -6,7 +6,8 @@ pyodbc
 selenium
 fake-useragent
 pandas
-langdetect
+emoji
+lingua-language-detector
 transformers
 seaborn
 matplotlib

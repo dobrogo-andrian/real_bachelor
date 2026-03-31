@@ -925,7 +925,7 @@
                         <article class="analysis-chart-card">
                             <h3>Comment length histogram</h3>
                             ${buildBarChartSvg(charts.comment_length_histogram || [], { title: 'Comment length histogram', color: '#b388eb' })}
-                            <p class="analysis-chart-note">Distribution of FilteredComment length in words.</p>
+                            <p class="analysis-chart-note">Distribution of normalized-comment length in words.</p>
                         </article>
                         <article class="analysis-chart-card">
                             <h3>Average length by sentiment</h3>
@@ -1027,7 +1027,7 @@
                             <article class="analysis-card">
                                 <h3>Avg length</h3>
                                 <span class="analysis-kpi-value">${escapeHtml(summary.avg_comment_length)}</span>
-                                <span class="analysis-meta">Words in FilteredComment</span>
+                                <span class="analysis-meta">Words in NormalizedComment</span>
                             </article>
                         </div>
                         <div class="analysis-grid-two">

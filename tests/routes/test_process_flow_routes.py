@@ -4,6 +4,26 @@ from tests.support.app_test_case import AppTestCase, app_module
 
 
 class ProcessFlowRouteTests(AppTestCase):
+    def test_extractor_page_dimensions_endpoint(self):
+        self.set_access_cookie("alice")
+
+        with patch.object(
+            app_module,
+            "fetch_distinct_comment_dimensions",
+            return_value={"page_names": ["page-a", "page-b"], "page_ids": ["id-a", "id-b"]},
+        ) as mocked_dimensions:
+            response = self.client.get(
+                "/api/extractor/page-dimensions",
+                headers={"Accept": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {"page_names": ["page-a", "page-b"], "page_ids": ["id-a", "id-b"]},
+        )
+        mocked_dimensions.assert_called_once_with()
+
     def test_process_data_endpoint(self):
         scenarios = [
             {

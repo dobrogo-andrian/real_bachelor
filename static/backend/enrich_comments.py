@@ -1,20 +1,24 @@
 import argparse
 import os
-import re
 import unicodedata
 import warnings
 from datetime import datetime, timezone
 from functools import lru_cache
 
 import pyodbc
-from langdetect import detect_langs
+from lingua.lingua import Language, LanguageDetectorBuilder
 from transformers import pipeline
 
 from static.backend import db_connection
 
 
-SUPPORTED_LANGUAGES = {"uk", "ru", "en", "symbols_only"}
+SUPPORTED_LANGUAGES = {"uk", "ru", "en", "other", "symbols_only"}
 DEFAULT_SENTIMENT = "neutral"
+LINGUA_LANGUAGE_MAP = {
+    Language.UKRAINIAN: "uk",
+    Language.RUSSIAN: "ru",
+    Language.ENGLISH: "en",
+}
 
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("USE_TF", "0")
@@ -31,48 +35,65 @@ def normalize_unicode(text):
     return unicodedata.normalize("NFC", text)
 
 
+def normalize_comment_for_analysis(text):
+    if not text:
+        return ""
+
+    text = normalize_unicode(text)
+    return " ".join(text.split())
+
+
+def _contains_letters(text):
+    return any(char.isalpha() for char in text)
+
+
+@lru_cache(maxsize=1)
+def get_language_detector():
+    return LanguageDetectorBuilder.from_all_languages().build()
+
+
+def _detect_with_lingua(text):
+    try:
+        detected_language = get_language_detector().detect_language_of(text)
+    except Exception:
+        return "other"
+
+    return LINGUA_LANGUAGE_MAP.get(detected_language, "other")
+
+
 def detect_main_language(comment):
-    if all(not char.isalnum() for char in comment):
+    if not comment or not comment.strip():
+        return "symbols_only"
+
+    if not _contains_letters(comment):
+        return "symbols_only"
+
+    normalized_comment = normalize_unicode(comment)
+    if not normalized_comment or not _contains_letters(normalized_comment):
         return "symbols_only"
 
     try:
-        langs = detect_langs(comment)
-        main_language = max(langs, key=lambda lang: lang.prob).lang
-        return main_language if main_language in {"uk", "ru", "en"} else "unknown"
+        return _detect_with_lingua(normalized_comment)
     except Exception:
-        return "unknown"
-
-
-def filter_comment_by_main_language(comment, main_language):
-    language_patterns = {
-        "uk": r"^[а-яА-ЯёЁіІїЇєЄґҐйЙ!?]+$",
-        "ru": r"^[а-яА-ЯёЁ!?]+$",
-        "en": r"^[a-zA-Z!?]+$",
-    }
-    allowed_pattern = language_patterns.get(main_language)
-    if not allowed_pattern:
-        return comment
-
-    filtered_words = [word for word in comment.split() if re.match(allowed_pattern, word)]
-    return " ".join(filtered_words)
+        return "other"
 
 
 @lru_cache(maxsize=1)
 def load_models():
-    return {
-        "uk": pipeline("sentiment-analysis", model="cardiffnlp/twitter-xlm-roberta-base-sentiment", framework="pt"),
-        "ru": pipeline("sentiment-analysis", model="blanchefort/rubert-base-cased-sentiment", framework="pt"),
-        "en": pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment", framework="pt"),
-        "symbols_only": pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment", framework="pt"),
-    }
+    model_name = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
+    return pipeline(
+        "sentiment-analysis",
+        model=model_name,
+        tokenizer=model_name,
+        framework="pt",
+        truncation=True,
+        max_length=512,
+    )
 
 
-def analyze_sentiment(comment, language, models):
-    if language not in models:
-        return DEFAULT_SENTIMENT
-
+def analyze_sentiment(comment, classifier):
     try:
-        result = models[language](comment)
+        result = classifier(comment)
         label = str(result[0]["label"]).lower()
         if label in {"label_0", "negative"}:
             return "negative"
@@ -175,24 +196,14 @@ def assign_comment_order(comment_rows):
 
 def enrich_comment(comment, models):
     normalized_comment = normalize_comment_payload(comment)
+    normalized_analysis_comment = normalize_comment_for_analysis(normalized_comment)
     main_language = detect_main_language(normalized_comment)
 
     if main_language not in SUPPORTED_LANGUAGES:
-        main_language = "unknown"
+        main_language = "other"
 
-    if main_language == "symbols_only":
-        filtered_comment = normalized_comment
-    elif main_language == "unknown":
-        filtered_comment = normalized_comment
-    else:
-        filtered_comment = filter_comment_by_main_language(normalized_comment, main_language).strip()
-
-    if not filtered_comment:
-        filtered_comment = normalized_comment
-
-    sentiment_input = filtered_comment or normalized_comment
-    if sentiment_input:
-        sentiment = analyze_sentiment(sentiment_input, main_language, models)
+    if normalized_analysis_comment:
+        sentiment = analyze_sentiment(normalized_analysis_comment, models)
     else:
         sentiment = DEFAULT_SENTIMENT
 
@@ -201,7 +212,7 @@ def enrich_comment(comment, models):
 
     return {
         "MainLanguage": main_language,
-        "FilteredComment": filtered_comment,
+        "NormalizedComment": normalized_analysis_comment,
         "Sentiment": sentiment,
     }
 
@@ -259,12 +270,11 @@ def prepare_enriched_rows(comment_rows, models, source):
             "PageID": row["PageID"],
             "PostHref": row.get("PostHref"),
             "PostTime": normalize_datetime_value(row["PostTime"]),
-            "Comment": row["Comment"],
             "CommentTime": normalize_datetime_value(row["CommentTime"]),
             "CommentOrder": comment_order,
             "CommentLikes": 0 if comment_order == 1 else row["CommentLikes"],
             "MainLanguage": enriched["MainLanguage"],
-            "FilteredComment": enriched["FilteredComment"],
+            "NormalizedComment": enriched["NormalizedComment"],
             "Sentiment": enriched["Sentiment"],
             "ProcessedTime": processed_time,
             "Source": source,
@@ -286,7 +296,6 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
         (pyodbc.SQL_WVARCHAR, 100, 0),
         (pyodbc.SQL_WVARCHAR, 0, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
-        (pyodbc.SQL_WVARCHAR, 0, 0),
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
         (pyodbc.SQL_INTEGER, 0, 0),
         (pyodbc.SQL_INTEGER, 0, 0),
@@ -305,12 +314,11 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
                 ? AS [PageID],
                 ? AS [PostHref],
                 ? AS [PostTime],
-                ? AS [Comment],
                 ? AS [CommentTime],
                 ? AS [CommentOrder],
                 ? AS [CommentLikes],
                 ? AS [MainLanguage],
-                ? AS [FilteredComment],
+                ? AS [NormalizedComment],
                 ? AS [Sentiment],
                 ? AS [ProcessedTime],
                 ? AS [Source]
@@ -321,12 +329,11 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
             OR ISNULL(target.[PageID], N'') <> ISNULL(source.[PageID], N'')
             OR ISNULL(target.[PostHref], N'') <> ISNULL(source.[PostHref], N'')
             OR ISNULL(target.[PostTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[PostTime], CONVERT(datetime2(0), '1900-01-01'))
-            OR ISNULL(target.[Comment], N'') <> ISNULL(source.[Comment], N'')
             OR ISNULL(target.[CommentTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[CommentTime], CONVERT(datetime2(0), '1900-01-01'))
             OR ISNULL(target.[CommentOrder], -1) <> ISNULL(source.[CommentOrder], -1)
             OR ISNULL(target.[CommentLikes], -1) <> ISNULL(source.[CommentLikes], -1)
             OR ISNULL(target.[MainLanguage], N'') <> ISNULL(source.[MainLanguage], N'')
-            OR ISNULL(target.[FilteredComment], N'') <> ISNULL(source.[FilteredComment], N'')
+            OR ISNULL(target.[NormalizedComment], N'') <> ISNULL(source.[NormalizedComment], N'')
             OR ISNULL(target.[Sentiment], N'') <> ISNULL(source.[Sentiment], N'')
             OR ISNULL(target.[Source], N'') <> ISNULL(source.[Source], N'')
         ) THEN
@@ -335,36 +342,35 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
                 [PageID] = source.[PageID],
                 [PostHref] = source.[PostHref],
                 [PostTime] = source.[PostTime],
-                [Comment] = source.[Comment],
                 [CommentTime] = source.[CommentTime],
                 [CommentOrder] = source.[CommentOrder],
                 [CommentLikes] = source.[CommentLikes],
                 [MainLanguage] = source.[MainLanguage],
-                [FilteredComment] = source.[FilteredComment],
+                [NormalizedComment] = source.[NormalizedComment],
                 [Sentiment] = source.[Sentiment],
                 [ProcessedTime] = source.[ProcessedTime],
                 [Source] = source.[Source]
         WHEN NOT MATCHED THEN
             INSERT (
-                [CommentHash], [PageName], [PageID], [PostHref], [PostTime], [Comment],
-                [CommentTime], [CommentOrder], [CommentLikes], [MainLanguage], [FilteredComment],
+                [CommentHash], [PageName], [PageID], [PostHref], [PostTime],
+                [CommentTime], [CommentOrder], [CommentLikes], [MainLanguage], [NormalizedComment],
                 [Sentiment], [ProcessedTime], [Source]
             )
             VALUES (
-                source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime], source.[Comment],
-                source.[CommentTime], source.[CommentOrder], source.[CommentLikes], source.[MainLanguage], source.[FilteredComment],
+                source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime],
+                source.[CommentTime], source.[CommentOrder], source.[CommentLikes], source.[MainLanguage], source.[NormalizedComment],
                 source.[Sentiment], source.[ProcessedTime], source.[Source]
             );
     """
     insert_if_missing_sql = """
         INSERT INTO [dbo].[EnrichedComments] (
-            [CommentHash], [PageName], [PageID], [PostHref], [PostTime], [Comment],
-            [CommentTime], [CommentOrder], [CommentLikes], [MainLanguage], [FilteredComment],
+            [CommentHash], [PageName], [PageID], [PostHref], [PostTime],
+            [CommentTime], [CommentOrder], [CommentLikes], [MainLanguage], [NormalizedComment],
             [Sentiment], [ProcessedTime], [Source]
         )
         SELECT
-            source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime], source.[Comment],
-            source.[CommentTime], source.[CommentOrder], source.[CommentLikes], source.[MainLanguage], source.[FilteredComment],
+            source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime],
+            source.[CommentTime], source.[CommentOrder], source.[CommentLikes], source.[MainLanguage], source.[NormalizedComment],
             source.[Sentiment], source.[ProcessedTime], source.[Source]
         FROM (
             SELECT
@@ -373,12 +379,11 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
                 ? AS [PageID],
                 ? AS [PostHref],
                 ? AS [PostTime],
-                ? AS [Comment],
                 ? AS [CommentTime],
                 ? AS [CommentOrder],
                 ? AS [CommentLikes],
                 ? AS [MainLanguage],
-                ? AS [FilteredComment],
+                ? AS [NormalizedComment],
                 ? AS [Sentiment],
                 ? AS [ProcessedTime],
                 ? AS [Source]
@@ -404,12 +409,11 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
                 row["PageID"],
                 row["PostHref"],
                 row["PostTime"],
-                row["Comment"],
                 row["CommentTime"],
                 row["CommentOrder"],
                 row["CommentLikes"],
                 row["MainLanguage"],
-                row["FilteredComment"],
+                row["NormalizedComment"],
                 row["Sentiment"],
                 row["ProcessedTime"],
                 row["Source"],

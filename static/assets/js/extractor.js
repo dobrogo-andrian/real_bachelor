@@ -9,6 +9,8 @@
   const processingPageNameField = document.getElementById('processing_page_name_field');
   const processingPageIdField = document.getElementById('processing_page_id_field');
   const processingSubmitButton = document.getElementById('processing_submit');
+  const processingHintBox = document.getElementById('processing_hint_box');
+  const processingHintText = document.getElementById('processing_hint_text');
   const manualLoginUsername = document.getElementById('manual-login-username');
   const manualLoginPasswordHint = document.getElementById('manual-login-password-hint');
   const processingButtons = [
@@ -17,6 +19,7 @@
     document.getElementById('analyze_whole_db'),
     document.getElementById('analyze_delta'),
   ];
+  let processingDimensions = null;
   let pendingAnalysisMode = null;
   let pendingAnalysisLabel = null;
 
@@ -66,11 +69,67 @@
     processingPageIdField.classList.remove('is-visible');
     processingPageNameInput.value = '';
     processingPageIdInput.value = '';
+    processingHintBox.hidden = true;
     pendingAnalysisMode = null;
     pendingAnalysisLabel = null;
   }
 
-  function showProcessingFilters(mode, optionLabel) {
+  async function loadProcessingDimensions() {
+    if (processingDimensions) {
+      return processingDimensions;
+    }
+
+    const rawResponse = await session.fetchWithCsrf('/api/extractor/page-dimensions', {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    const response = await session.ensureAuthenticatedResponse(rawResponse);
+    if (!response) {
+      return null;
+    }
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to load page dimensions.');
+    }
+
+    processingDimensions = data;
+    return processingDimensions;
+  }
+
+  async function showProcessingHint(mode) {
+    if (mode !== 'page_name' && mode !== 'page_id') {
+      processingHintBox.hidden = true;
+      processingHintText.textContent =
+        'Select a page-level processing option to load distinct page names or page IDs from the database.';
+      return;
+    }
+
+    processingHintBox.hidden = false;
+    processingHintText.textContent = `Loading distinct ${mode === 'page_name' ? 'page names' : 'page IDs'}...`;
+
+    try {
+      const dimensions = await loadProcessingDimensions();
+      if (!dimensions) {
+        return;
+      }
+
+      const values = mode === 'page_name' ? (dimensions.page_names || []) : (dimensions.page_ids || []);
+      if (!values.length) {
+        processingHintText.textContent = `No distinct ${mode === 'page_name' ? 'page names' : 'page IDs'} found in the database yet.`;
+        return;
+      }
+
+      processingHintText.textContent = `Distinct ${mode === 'page_name' ? 'page names' : 'page IDs'}: ${values.join(', ')}`;
+    } catch (error) {
+      processingHintText.textContent = error.message;
+    }
+  }
+
+  async function showProcessingFilters(mode, optionLabel) {
     const isSameModeVisible =
       processingFilters.classList.contains('is-visible') &&
       pendingAnalysisMode === mode;
@@ -93,6 +152,8 @@
       processingPageNameInput.value = '';
       processingPageIdInput.focus();
     }
+
+    await showProcessingHint(mode);
   }
 
   async function runAnalysis(mode, optionLabel) {
@@ -192,11 +253,13 @@
 
   document.getElementById('analyze_whole_db').addEventListener('click', () => {
     hideProcessingFilters();
+    showProcessingHint('whole_db');
     runAnalysis('whole_db', 'whole db');
   });
 
   document.getElementById('analyze_delta').addEventListener('click', () => {
     hideProcessingFilters();
+    showProcessingHint('delta');
     runAnalysis('delta', 'delta');
   });
 
