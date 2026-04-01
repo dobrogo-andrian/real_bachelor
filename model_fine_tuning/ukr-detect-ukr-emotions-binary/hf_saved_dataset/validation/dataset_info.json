@@ -1,0 +1,86 @@
+{
+  "builder_name": "csv",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "ukr-emotions-binary",
+  "dataset_size": 900247,
+  "description": "",
+  "download_checksums": {
+    "hf://datasets/ukr-detect/ukr-emotions-binary@395c2b2f025b63c04166b36846a6138192bfde2b/train.tsv": {
+      "num_bytes": 344263,
+      "checksum": null
+    },
+    "hf://datasets/ukr-detect/ukr-emotions-binary@395c2b2f025b63c04166b36846a6138192bfde2b/dev.tsv": {
+      "num_bytes": 35714,
+      "checksum": null
+    },
+    "hf://datasets/ukr-detect/ukr-emotions-binary@395c2b2f025b63c04166b36846a6138192bfde2b/test.tsv": {
+      "num_bytes": 314186,
+      "checksum": null
+    }
+  },
+  "download_size": 694163,
+  "features": {
+    "id": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "text": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "Joy": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "Fear": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "Anger": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "Sadness": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "Disgust": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "Surprise": {
+      "dtype": "int64",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 1594410,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 447034,
+      "num_examples": 2466,
+      "dataset_name": "ukr-emotions-binary"
+    },
+    "validation": {
+      "name": "validation",
+      "num_bytes": 46017,
+      "num_examples": 249,
+      "dataset_name": "ukr-emotions-binary"
+    },
+    "test": {
+      "name": "test",
+      "num_bytes": 407196,
+      "num_examples": 2234,
+      "dataset_name": "ukr-emotions-binary"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}
