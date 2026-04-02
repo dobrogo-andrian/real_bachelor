@@ -8,9 +8,10 @@
 - Stores application users, encrypted Instagram credentials, and per-user protected Instagram session cookies in SQL Server.
 - Stores application passwords as adaptive `scrypt` hashes and upgrades legacy SHA-256 hashes on successful login.
 - Runs an Instagram extraction workflow with Selenium and ChromeDriver.
-- Loads scraped CSV files into a `Comments` table.
-- Builds an `EnrichedComments` layer with language detection and sentiment scoring.
+- Streams scraped comment batches directly into the `Comments` table.
+- Builds an `EnrichedComments` layer with batched language detection and Hugging Face sentiment inference.
 - Serves explorer and advanced-analysis pages backed by filtered database queries.
+- Includes a local fine-tuning workspace for LoRA-based sentiment adapters.
 
 ## Main application flow
 
@@ -21,9 +22,13 @@
    - runs `extract_data(...)`,
    - reuses that user's signed Instagram session cookies when available, otherwise waits for manual login in the opened browser window and then updates the stored cookie payload,
    - aborts the run if Instagram shows a restriction or challenge page,
-   - loads discovered CSV files from `unprocessed_data/` into SQL Server with `load_to_db(...)`.
+   - streams each extracted post's comment batch directly into SQL Server through bounded loader batches.
 4. The user can call `/enrich-comments` to populate or refresh `EnrichedComments`.
+   - delta mode reads raw comments on one DB connection and writes enriched rows on a separate DB connection to avoid ODBC streaming conflicts.
+   - sentiment inference is executed in batches rather than one comment at a time.
 5. The explorer and advanced-analysis pages query enriched rows and build chart-ready summaries.
+
+If `ENABLE_BACKGROUND_JOBS=true`, `/process-data` and `/enrich-comments` return `202` plus a `job_id`, and the client polls `/jobs/<job_id>` until completion.
 
 ## Key routes
 
@@ -36,6 +41,7 @@
   - `/submit-form`
   - `/process-data`
   - `/enrich-comments`
+  - `/jobs/<job_id>`
   - `/page-analysis`
   - `/api/advanced-analysis/preview`
   - `/api/advanced-analysis/analyze`
@@ -45,9 +51,9 @@
 - `app.py`: Flask entrypoint, route definitions, JWT handling, and orchestration of extraction/loading/enrichment/analysis.
 - `static/backend/`: Python backend modules and page-specific frontend scripts.
 - `templates/`: Jinja/HTML pages for login, signup, account management, extractor, explorer, advanced analysis, FAQ, and landing pages.
-- `static/assets/`: HTML5UP "Forty" theme assets plus project CSS.
+- `static/assets/`: HTML5UP "Forty" theme assets plus project CSS/JS extracted from templates.
 - `ddl/`: SQL Server table definitions for `Users`, `Comments`, and `EnrichedComments`.
-- `unprocessed_data/`: generated raw CSV files from extraction jobs.
+- `model_fine_tuning/`: dataset preparation, download helpers, LoRA training script, synthetic slang generator, and saved adapters/artifacts.
 Detailed structure notes live in `PROJECT_STRUCTURE.md`.
 
 ## Requirements
@@ -63,6 +69,9 @@ Python packages are listed in `requirements.txt`:
 - `pandas`
 - `langdetect`
 - `transformers`
+- `peft`
+- `datasets`
+- `lingua-language-detector`
 - `seaborn`
 - `matplotlib`
 - `statsmodels`
@@ -99,7 +108,8 @@ pip install -r requirements.txt
    - `ddl/Users_AddInstagramCookies.sql` for existing databases that need the new cookie columns
    - `ddl/Comments.sql`
    - `ddl/EnrichedComments.sql`
-   - For an existing database, apply `ddl/migrations/001_harden_users_password_storage.sql`.
+   - For an existing database, apply `ddl/migrations/001_harden_users_password_storage.sql`
+   - Apply `ddl/migrations/002_optimize_comment_and_enrichedcomments_indexes.sql` for the current comment/enrichment indexes
 5. Update `CHROMEDRIVER_PATH` in `.env` if ChromeDriver is not on your PATH.
 6. Start the Flask app:
 
@@ -117,15 +127,24 @@ The app runs on `http://localhost:5000`.
 
 ## Operational notes
 
-- The scraper writes CSV files under `unprocessed_data/`.
-- `load_to_db()` reads every CSV under `unprocessed_data/` recursively.
-- `enrich_comments()` supports scoped processing by mode, page name, or page id.
+- `/process-data` keeps extraction rows in memory only long enough to load one post batch at a time.
+- `load_row_batches()` chunks oversized batches before insertion so long runs do not accumulate all rows in RAM.
+- `enrich_comments()` supports scoped processing by mode, page name, page id, or delta.
+- Enrichment uses chunked DB reads, batched transformer inference, temp-table staging, and separate read/write connections.
+- The extractor page now polls queued jobs and prevents enrichment while extraction is still running.
 - Advanced analysis supports filters for page, source, language, sentiment, likes, time windows, first-comment sentiment, and text search.
+
+## Fine-tuning workspace
+
+- `model_fine_tuning/train_lora_sentiment.py` trains LoRA adapters from `balanced_dataset.csv`.
+- `model_fine_tuning/prepare_and_balance_data.py` now exports CSV by default; Hugging Face `save_to_disk()` artifacts are opt-in via `--save-hf-dataset`.
+- The dataset download helpers under `model_fine_tuning/*/download_dataset.py` also default to CSV-only export.
+- Saved `dataset_info.json`, `state.json`, and `.arrow` files are not required for the current training path.
 
 ## Current caveats
 
 - `static/backend/extract_data.py` uses optional `.env` variables for its standalone `__main__` entrypoint.
-- Generated directories such as `__pycache__/` and `unprocessed_data/` are currently present in the repository worktree.
+- Generated directories such as `__pycache__/` may be present in the repository worktree.
 
 ## License
 

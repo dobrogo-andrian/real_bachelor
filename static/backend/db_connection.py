@@ -12,6 +12,7 @@ from env_config import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+pyodbc.pooling = True
 
 
 CRYPTPROTECT_UI_FORBIDDEN = 0x01
@@ -161,7 +162,10 @@ def _add_first_comment_sentiment_filter(where_clauses, params, values, table_ali
 
 
 def get_db_connection():
-    conn = pyodbc.connect(_build_connection_string())
+    conn = pyodbc.connect(
+        _build_connection_string(),
+        timeout=int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "5")),
+    )
     return conn
 
 
@@ -472,14 +476,14 @@ def fetch_account_statistics():
             row = cursor.fetchone()
             stats["distinct_pages"] = int(row[0]) if row and row[0] is not None else 0
         except Exception:
-            pass
+            logger.exception("Failed to read comment statistics.")
 
         try:
             cursor.execute("SELECT COUNT(*) FROM [dbo].[EnrichedComments]")
             row = cursor.fetchone()
             stats["enriched_comments"] = int(row[0]) if row and row[0] is not None else 0
         except Exception:
-            pass
+            logger.exception("Failed to read enriched comment statistics.")
 
         return stats
     finally:
@@ -846,6 +850,54 @@ def fetch_enriched_comment_rows(filters):
     finally:
         cursor.close()
         conn.close()
+
+
+def build_enriched_comment_preview_from_rows(rows, filters, limit=100):
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            row.get("PostTime") is None,
+            row.get("PostTime"),
+            row.get("CommentTime") is None,
+            row.get("CommentTime"),
+            row.get("CommentHash"),
+        ),
+        reverse=True,
+    )
+
+    preview_rows = []
+    for raw_row in sorted_rows[: int(limit)]:
+        row = dict(raw_row)
+        for key, value in list(row.items()):
+            if hasattr(value, "isoformat"):
+                row[key] = value.isoformat(sep=" ")
+        preview_rows.append(row)
+
+    likes = [int(row.get("CommentLikes") or 0) for row in rows]
+    processed_times = [row.get("ProcessedTime") for row in rows if row.get("ProcessedTime") is not None]
+    distinct_posts = {
+        (
+            row.get("PageID") or "",
+            row.get("PageName") or "",
+            row.get("PostTime").isoformat(sep=" ") if hasattr(row.get("PostTime"), "isoformat") else str(row.get("PostTime") or ""),
+        )
+        for row in rows
+    }
+
+    return {
+        "summary": {
+            "total_comments": len(rows),
+            "distinct_comments": len({row.get("CommentHash") for row in rows}),
+            "distinct_posts": len(distinct_posts),
+            "distinct_pages": len({row.get("PageID") for row in rows if row.get("PageID")}),
+            "average_likes": round(sum(likes) / len(likes), 2) if likes else 0.0,
+            "latest_processed_time": max(processed_times).isoformat(sep=" ") if processed_times else None,
+        },
+        "rows": preview_rows,
+        "applied_filters": {
+            key: value for key, value in filters.items() if value not in (None, "", [])
+        },
+    }
 
 
 def fetch_post_anchor_sentiments(post_refs):

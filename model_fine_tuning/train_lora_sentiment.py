@@ -16,23 +16,25 @@ Example:
 from __future__ import annotations
 
 import argparse
+import math
 import logging
 import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
 from datasets import DatasetDict, load_dataset
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from sklearn.metrics import accuracy_score, f1_score
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
     DataCollatorWithPadding,
+    PreTrainedTokenizerBase,
     Trainer,
     TrainingArguments,
     set_seed,
@@ -73,8 +75,20 @@ class ScriptConfig:
     per_device_train_batch_size: int
     per_device_eval_batch_size: int
     gradient_accumulation_steps: int
+    eval_strategy: str
+    save_strategy: str
     logging_steps: int
+    eval_steps: int | None
+    save_steps: int | None
     warmup_ratio: float
+
+
+@dataclass(frozen=True)
+class PrecisionConfig:
+    fp16: bool
+    bf16: bool
+    pad_to_multiple_of: int | None
+    accelerator_name: str
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -112,7 +126,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=4,
         help="Accumulate gradients to simulate a larger effective batch size.",
     )
+    parser.add_argument("--eval-strategy", choices=["epoch", "steps"], default="epoch", help="Evaluation schedule.")
+    parser.add_argument("--save-strategy", choices=["epoch", "steps"], default="epoch", help="Checkpoint schedule.")
     parser.add_argument("--logging-steps", type=int, default=25, help="Trainer logging interval.")
+    parser.add_argument("--eval-steps", type=int, default=None, help="Evaluation interval when using step-based evaluation.")
+    parser.add_argument("--save-steps", type=int, default=None, help="Checkpoint interval when using step-based saving.")
     parser.add_argument("--warmup-ratio", type=float, default=0.05, help="Warmup ratio.")
     return parser
 
@@ -131,7 +149,11 @@ def parse_args() -> ScriptConfig:
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
+        eval_strategy=args.eval_strategy,
+        save_strategy=args.save_strategy,
         logging_steps=args.logging_steps,
+        eval_steps=args.eval_steps,
+        save_steps=args.save_steps,
         warmup_ratio=args.warmup_ratio,
     )
 
@@ -192,12 +214,46 @@ def validate_environment(config: ScriptConfig) -> None:
     if config.gradient_accumulation_steps <= 0:
         raise ValueError("--gradient-accumulation-steps must be positive.")
 
-    if not torch.cuda.is_available():
-        raise EnvironmentError(
-            "CUDA is not available in the current PyTorch installation. "
-            f"Detected torch={torch.__version__}. This script requires a CUDA-enabled PyTorch build because "
-            "it uses fp16=True for memory-efficient training. Install a matching CUDA build of PyTorch and retry."
-        )
+def resolve_precision_config() -> PrecisionConfig:
+    if torch.cuda.is_available():
+        bf16_supported = bool(getattr(torch.cuda, "is_bf16_supported", lambda: False)())
+        if bf16_supported:
+            return PrecisionConfig(fp16=False, bf16=True, pad_to_multiple_of=8, accelerator_name="cuda-bf16")
+        return PrecisionConfig(fp16=True, bf16=False, pad_to_multiple_of=8, accelerator_name="cuda-fp16")
+    return PrecisionConfig(fp16=False, bf16=False, pad_to_multiple_of=None, accelerator_name="cpu")
+
+
+def resolve_step_intervals(config: ScriptConfig) -> tuple[int | None, int | None]:
+    if config.eval_strategy != "steps" and config.save_strategy != "steps":
+        return None, None
+
+    eval_steps = config.eval_steps if config.eval_strategy == "steps" else None
+    save_steps = config.save_steps if config.save_strategy == "steps" else None
+
+    default_steps = max(config.logging_steps, 1)
+    if eval_steps is None and config.eval_strategy == "steps":
+        eval_steps = save_steps or default_steps
+    if save_steps is None and config.save_strategy == "steps":
+        save_steps = eval_steps or default_steps
+
+    if eval_steps is not None and eval_steps <= 0:
+        raise ValueError("--eval-steps must be positive when eval-strategy=steps.")
+    if save_steps is not None and save_steps <= 0:
+        raise ValueError("--save-steps must be positive when save-strategy=steps.")
+    if eval_steps is not None and save_steps is not None and save_steps % eval_steps != 0:
+        raise ValueError("--save-steps must be a round multiple of --eval-steps when load_best_model_at_end is enabled.")
+
+    return eval_steps, save_steps
+
+
+def calculate_warmup_steps(train_dataset_size: int, config: ScriptConfig) -> int:
+    if train_dataset_size <= 0:
+        return 0
+
+    effective_batch = max(config.per_device_train_batch_size * config.gradient_accumulation_steps, 1)
+    steps_per_epoch = max(math.ceil(train_dataset_size / effective_batch), 1)
+    total_training_steps = max(math.ceil(steps_per_epoch * config.num_train_epochs), 1)
+    return max(int(total_training_steps * config.warmup_ratio), 0)
 
 
 def normalize_social_text(text: str) -> str:
@@ -255,25 +311,32 @@ def load_and_split_dataset(csv_path: Path, seed: int) -> DatasetDict:
     return dataset_dict
 
 
-def build_tokenizer(model_name: str):
+def build_tokenizer(model_name: str) -> PreTrainedTokenizerBase:
     logging.info("Loading tokenizer: %s", model_name)
-    return AutoTokenizer.from_pretrained(
-        model_name,
+    tokenizer = AutoTokenizer.from_pretrained(
+        pretrained_model_name_or_path=model_name,
         use_fast=True,
-        clean_up_tokenization_spaces=False,
     )
+    if not isinstance(tokenizer, PreTrainedTokenizerBase):
+        raise TypeError(f"Loaded tokenizer has unexpected type: {type(tokenizer)!r}")
+    return tokenizer
 
 
-def tokenize_dataset(dataset: DatasetDict, tokenizer, max_length: int) -> DatasetDict:
+def tokenize_dataset(
+    dataset: DatasetDict,
+    tokenizer: PreTrainedTokenizerBase,
+    max_length: int,
+) -> DatasetDict:
     logging.info("Tokenizing with truncation and max_length=%s", max_length)
 
     def tokenize_batch(batch: dict[str, list[Any]]) -> dict[str, Any]:
-        return tokenizer(
-            batch[TEXT_COLUMN],
+        encoded_batch = tokenizer(
+            text=batch[TEXT_COLUMN],
             truncation=True,
             max_length=max_length,
             padding=False,
         )
+        return dict(encoded_batch)
 
     tokenized = dataset.map(
         tokenize_batch,
@@ -284,7 +347,7 @@ def tokenize_dataset(dataset: DatasetDict, tokenizer, max_length: int) -> Datase
     return tokenized
 
 
-def build_model(model_name: str):
+def build_model(model_name: str) -> PeftModel:
     logging.info("Loading base model: %s", model_name)
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name,
@@ -308,7 +371,7 @@ def build_model(model_name: str):
         bias="none",
     )
 
-    model = get_peft_model(model, lora_config)
+    model = cast(PeftModel, get_peft_model(model, lora_config))
     model.print_trainable_parameters()
     return model
 
@@ -325,9 +388,11 @@ def compute_metrics(eval_pred) -> dict[str, float]:
     }
 
 
-def build_training_arguments(config: ScriptConfig) -> TrainingArguments:
+def build_training_arguments(config: ScriptConfig, precision: PrecisionConfig, train_dataset_size: int) -> TrainingArguments:
     output_dir = str(config.output_dir / "trainer_artifacts")
     logging.info("Preparing Trainer arguments with memory-saving settings")
+    eval_steps, save_steps = resolve_step_intervals(config)
+    warmup_steps = calculate_warmup_steps(train_dataset_size, config)
     return TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=config.num_train_epochs,
@@ -336,13 +401,16 @@ def build_training_arguments(config: ScriptConfig) -> TrainingArguments:
         per_device_train_batch_size=config.per_device_train_batch_size,
         per_device_eval_batch_size=config.per_device_eval_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
-        eval_strategy="epoch",
-        save_strategy="epoch",
+        eval_strategy=config.eval_strategy,
+        save_strategy=config.save_strategy,
         logging_strategy="steps",
         logging_steps=config.logging_steps,
-        fp16=True,
+        eval_steps=eval_steps,
+        save_steps=save_steps,
+        fp16=precision.fp16,
+        bf16=precision.bf16,
         gradient_checkpointing=True,
-        warmup_steps=500,
+        warmup_steps=warmup_steps,
         load_best_model_at_end=True,
         metric_for_best_model="f1_macro",
         greater_is_better=True,
@@ -360,9 +428,10 @@ def train_and_save(config: ScriptConfig) -> None:
     tokenizer = build_tokenizer(config.model_name)
     tokenized_dataset = tokenize_dataset(dataset, tokenizer, config.max_length)
     model = build_model(config.model_name)
+    precision = resolve_precision_config()
 
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer, pad_to_multiple_of=8)
-    training_args = build_training_arguments(config)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer, pad_to_multiple_of=precision.pad_to_multiple_of)
+    training_args = build_training_arguments(config, precision, len(tokenized_dataset["train"]))
 
     trainer = Trainer(
         model=model,
@@ -431,8 +500,12 @@ def main() -> None:
         validate_environment(config)
         logging.info("Using dataset: %s", config.csv_path.resolve())
         logging.info("Adapter output directory: %s", config.output_dir.resolve())
+        precision = resolve_precision_config()
         logging.info(
-            "Memory settings: fp16=True | gradient_checkpointing=True | train_batch=%s | grad_accum=%s | max_length=%s",
+            "Runtime settings: accelerator=%s | fp16=%s | bf16=%s | gradient_checkpointing=True | train_batch=%s | grad_accum=%s | max_length=%s",
+            precision.accelerator_name,
+            precision.fp16,
+            precision.bf16,
             config.per_device_train_batch_size,
             config.gradient_accumulation_steps,
             config.max_length,

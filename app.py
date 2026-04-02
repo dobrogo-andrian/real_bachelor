@@ -17,10 +17,13 @@ load_dotenv()
 
 from flask import Flask, request, jsonify, redirect, url_for, render_template, send_from_directory, make_response
 from static.backend.extract_data import extract_data
-from static.backend.load_to_db import load_to_db
+from static.backend.faq_content import FAQ_REFERENCE, PAGE_SECTIONS
+from static.backend.load_to_db import load_row_batches
 from static.backend.enrich_comments import enrich_comments
 from static.backend.explorer_analysis import build_page_analysis, build_analysis_from_rows
+from static.backend.job_queue import job_queue
 from static.backend.db_connection import (
+    build_enriched_comment_preview_from_rows,
     clear_user_instagram_cookies,
     fetch_account_statistics,
     insert_new_user,
@@ -30,8 +33,8 @@ from static.backend.db_connection import (
     fetch_distinct_comment_dimensions,
     fetch_existing_post_hrefs,
     fetch_advanced_comment_dimensions,
-    fetch_enriched_comment_preview,
     fetch_enriched_comment_rows,
+    get_db_connection,
     set_user_email_verified,
     update_user_password_hash,
     update_user_instagram_credentials,
@@ -74,6 +77,7 @@ app.config['RATE_LIMIT_ENRICH_COMMENTS_MAX_ATTEMPTS'] = get_int_env('RATE_LIMIT_
 app.config['RATE_LIMIT_ENRICH_COMMENTS_WINDOW_SECONDS'] = get_int_env('RATE_LIMIT_ENRICH_COMMENTS_WINDOW_SECONDS', 60)
 app.config['RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS'] = get_int_env('RATE_LIMIT_ANALYSIS_MAX_ATTEMPTS', 60)
 app.config['RATE_LIMIT_ANALYSIS_WINDOW_SECONDS'] = get_int_env('RATE_LIMIT_ANALYSIS_WINDOW_SECONDS', 60)
+app.config['ENABLE_BACKGROUND_JOBS'] = get_bool_env('ENABLE_BACKGROUND_JOBS', default=False)
 logging.basicConfig(level=logging.DEBUG if debug_enabled else logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG if debug_enabled else logging.INFO)
@@ -187,6 +191,10 @@ def _internal_error_response(client_message):
     return jsonify({'error': client_message}), 500
 
 
+def _job_response(job_id):
+    return jsonify({'job_id': job_id, 'status': 'queued'}), 202
+
+
 def limit_requests(bucket_name, max_attempts_config_key, window_seconds_config_key, key_builder, scope):
     def decorator(view_func):
         @wraps(view_func)
@@ -218,6 +226,114 @@ def _build_login_rate_limit_key():
     username = str(data.get('username', '')).strip().lower() or 'anonymous'
     client_id = _get_request_client_identifier()
     return f'{client_id}:{username}'
+
+
+@app.route('/jobs/<job_id>', methods=['GET'])
+@jwt_required()
+def job_status(job_id):
+    job = job_queue.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found.'}), 404
+    return jsonify(job), 200
+
+
+def _run_process_data(current_user, params):
+    target_page = str(params.get("param1", "")).strip()
+    number_of_posts = int(params.get("param2"))
+    headless_session_only = bool(params.get("headless_session_only"))
+
+    instagram_credentials = fetch_user_instagram_credentials(current_user)
+    if not instagram_credentials:
+        return {'error': 'Logged in user was not found.'}, 404
+
+    instagram_username = instagram_credentials.get('instagram_login')
+    instagram_password = instagram_credentials.get('instagram_password')
+    if not instagram_username or not instagram_password:
+        return {'error': 'Instagram credentials are missing for the logged in user.'}, 400
+
+    existing_post_hrefs = fetch_existing_post_hrefs(target_page)
+    logger.debug(
+        "Found %s existing post hrefs for page_id=%s before extraction",
+        len(existing_post_hrefs),
+        target_page,
+    )
+
+    db_conn = None
+
+    def persist_comment_batch(rows):
+        nonlocal db_conn
+        if not rows:
+            return 0
+        if db_conn is None:
+            db_conn = get_db_connection()
+        load_result = load_row_batches([rows], dry_run=False, conn=db_conn)
+        return load_result.get('rows_loaded', 0)
+
+    try:
+        extraction_result = extract_data(
+            instagram_username,
+            instagram_password,
+            target_page,
+            number_of_posts,
+            existing_post_hrefs=existing_post_hrefs,
+            app_username=current_user,
+            headless_session_only=headless_session_only,
+            comment_batch_handler=persist_comment_batch,
+        )
+    finally:
+        if db_conn is not None:
+            db_conn.close()
+    if extraction_result.get('aborted_reason'):
+        return {
+            'error': extraction_result['aborted_reason'],
+            'result': extraction_result,
+        }, 409
+    if extraction_result.get('new_posts_found', 0) == 0:
+        return {
+            'success': True,
+            'result': {
+                'target_page': target_page,
+                'posts_requested': number_of_posts,
+                'posts_loaded': 0,
+                'comments_collected': 0,
+                'rows_loaded_to_db': 0,
+                'files_processed': 0,
+                'message': 'No new posts found. Existing database posts were skipped.',
+            }
+        }, 200
+    if extraction_result.get('posts_loaded', 0) == 0:
+        return {
+            'error': 'Extraction did not produce any post batches.',
+            'result': extraction_result,
+        }, 502
+
+    return {
+        'success': True,
+        'result': {
+            'target_page': target_page,
+            'posts_requested': number_of_posts,
+            'posts_loaded': extraction_result.get('posts_loaded', 0),
+            'comments_collected': extraction_result.get('comments_collected', 0),
+            'rows_loaded_to_db': extraction_result.get('rows_loaded_to_db', 0),
+            'files_processed': extraction_result.get('batches_loaded_to_db', 0),
+        }
+    }, 200
+
+
+def _run_enrich_comments(mode, page_name=None, page_id=None):
+    result = enrich_comments(mode=mode, page_name=page_name, page_id=page_id)
+    logger.info(
+        "enrich-comments finished: mode=%s selected=%s processed=%s added=%s updated=%s deleted=%s page_name=%s page_id=%s",
+        result.get('mode'),
+        result.get('selected'),
+        result.get('processed'),
+        result.get('added_count', 0),
+        result.get('updated_count', 0),
+        result.get('deleted', 0),
+        result.get('page_name'),
+        result.get('page_id'),
+    )
+    return {'success': True, 'result': result}, 200
 
 
 @app.route('/static/<path:filename>')
@@ -463,7 +579,7 @@ def explorer():
     page_loading_error = None
     try:
         page_dimensions = fetch_distinct_comment_dimensions()
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to load distinct page dimensions for explorer.")
         page_loading_error = "Could not load page lists right now."
 
@@ -492,7 +608,7 @@ def advanced_analysis():
     page_loading_error = None
     try:
         advanced_dimensions = fetch_advanced_comment_dimensions()
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to load advanced analysis dimensions.")
         page_loading_error = "Could not load advanced-analysis filters right now."
 
@@ -517,8 +633,8 @@ def advanced_analysis_preview():
     payload = request.get_json(silent=True) or {}
     logger.debug("Advanced analysis preview payload: %s", payload)
     try:
-        preview = fetch_enriched_comment_preview(payload, limit=100)
         analysis_rows = fetch_enriched_comment_rows(payload)
+        preview = build_enriched_comment_preview_from_rows(analysis_rows, payload, limit=100)
         analysis = build_analysis_from_rows(
             analysis_rows,
             selection_type="advanced_filters",
@@ -527,7 +643,7 @@ def advanced_analysis_preview():
         )
         preview["analysis"] = analysis
         return jsonify(preview), 200
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to fetch advanced analysis preview.")
         return _internal_error_response("Failed to load advanced analysis preview.")
 
@@ -553,7 +669,7 @@ def advanced_analysis_analyze():
             filters=payload,
         )
         return jsonify({"analysis": analysis}), 200
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to build advanced analysis charts.")
         return _internal_error_response("Failed to build advanced analysis.")
 
@@ -563,202 +679,11 @@ def advanced_analysis_analyze():
 def faq():
     current_user = get_jwt_identity()
     logger.debug(f"Current user: {current_user}")
-    page_sections = [
-        {
-            "title": "Home",
-            "route": "/",
-            "access": "Public",
-            "summary": "Landing page for the whole workspace. It introduces the product, links to every main page, and reflects whether the visitor is already authenticated.",
-            "details": [
-                "Shows the current workspace scope: extractor, explorer, advanced analysis, FAQ, signup, and login.",
-                "Detects an existing session from the browser and replaces login prompts with a logged-in indicator.",
-                "Acts as the safest re-entry point when a user is deciding which workflow page to open next.",
-            ],
-        },
-        {
-            "title": "Login",
-            "route": "/login",
-            "access": "Public",
-            "summary": "Authentication entry page for application users. Opening this page also resets any existing JWT cookie session before showing the form.",
-            "details": [
-                "Accepts the application username and password stored in the `Users` table.",
-                "Uses the `next` query parameter to return the user to the protected page they originally requested.",
-                "Always clears the current session on page load so the login form starts from a clean authentication state.",
-            ],
-        },
-        {
-            "title": "Sign Up",
-            "route": "/signup",
-            "access": "Public",
-            "summary": "Account creation page for new operators. It creates the application account and stores encrypted Instagram credentials for later extraction jobs.",
-            "details": [
-                "Collects username, email, application password, Instagram login, and Instagram password.",
-                "Hashes the application password before storage and protects Instagram credentials with reversible encryption.",
-                "Prepares the user record so later workflows can use saved Instagram credentials without storing them as plaintext.",
-            ],
-        },
-        {
-            "title": "Extractor",
-            "route": "/extractor",
-            "access": "Authenticated",
-            "summary": "Data ingestion page. It is responsible for starting the Instagram extraction flow and loading new comments into the database.",
-            "details": [
-                "Accepts a target page, number of posts, and Instagram credentials for the extraction session.",
-                "Calls the backend extraction script and then loads the result into SQL Server through `load_to_db`.",
-                "Should be used first whenever fresh comments are needed before any analytical work can begin.",
-            ],
-        },
-        {
-            "title": "Explorer",
-            "route": "/explorer",
-            "access": "Authenticated",
-            "summary": "Primary analysis page for page-level exploration. It lets the user select a page, run analysis, and inspect result summaries built from the warehouse.",
-            "details": [
-                "Loads distinct page names and page ids from the `Comments` table.",
-                "Focuses on guided exploration rather than arbitrary row-level filtering.",
-                "Works best when the user already knows which Instagram page or page id they want to review.",
-            ],
-        },
-        {
-            "title": "Advanced Analysis",
-            "route": "/advanced-analysis",
-            "access": "Authenticated",
-            "summary": "Detailed filter workspace for enriched comments. It goes beyond Explorer by allowing direct row preview and more granular segment construction.",
-            "details": [
-                "Supports combined filtering by page name, page id, source, language, sentiment, likes, time windows, and text search.",
-                "Returns both row previews and aggregated analysis derived from the filtered subset.",
-                "Is the right page when the user needs precise slices of the dataset instead of a broader page-level overview.",
-            ],
-        },
-        {
-            "title": "FAQ",
-            "route": "/faq",
-            "access": "Authenticated",
-            "summary": "Reference page for the entire application. It documents what every page does, how the data model is structured, and how the processing pipeline is organized.",
-            "details": [
-                "Keeps product and technical reference material separate from the live analysis workflows.",
-                "Documents the shared source tables, enrichment stages, and intended responsibilities of each page.",
-                "Also contains the contact section for questions, handoff notes, or future maintenance work.",
-            ],
-        },
-        {
-            "title": "Elements",
-            "route": "/elements",
-            "access": "Authenticated",
-            "summary": "Template support page inherited from the base theme. It is not part of the main analysis workflow but remains available as a design and component reference.",
-            "details": [
-                "Useful when comparing existing UI components from the HTML template.",
-                "Can be removed later if the project no longer needs the theme reference page.",
-                "Should not be presented as a core analytical step for end users.",
-            ],
-        },
-        {
-            "title": "Test",
-            "route": "/test",
-            "access": "Public",
-            "summary": "Utility page for local experiments and temporary checks. It is not a documented end-user workflow page.",
-            "details": [
-                "Can be used for isolated frontend or backend verification during development.",
-                "Should stay clearly separated from the production-facing navigation.",
-                "May be removed or repurposed once its temporary development value is gone.",
-            ],
-        },
-    ]
-
-    faq_reference = {
-        "schema_columns": [
-            {"name": "CommentHash", "role": "Primary key", "description": "Stable SHA-256 identifier used for deduplication and upserts."},
-            {"name": "PageName", "role": "Dimension", "description": "Display name of the Instagram page for grouping and filtering."},
-            {"name": "PageID", "role": "Dimension", "description": "Stable page handle used as the main entity key in the UI."},
-            {"name": "PostTime", "role": "Timeline anchor", "description": "Lets the interface build post-order and trend analysis over time."},
-            {"name": "Comment", "role": "Core text", "description": "Raw input for language detection, sentiment, and qualitative review."},
-            {"name": "CommentTime", "role": "Event time", "description": "Supports response windows, posting rhythm, and freshness filters."},
-            {"name": "CommentLikes", "role": "Engagement signal", "description": "Weights notable comments and highlights audience resonance."},
-            {"name": "LoadTime", "role": "Ingestion audit", "description": "Tracks when comments were loaded into the warehouse."},
-            {"name": "Source", "role": "Lineage", "description": "Separates web-ingested data from future loaders or imports."},
-        ],
-        "pipeline_steps": [
-            {
-                "title": "1. Source Selection",
-                "module": "Comments table",
-                "description": "choose a page, period, source, and post window from the central table before any derived analysis runs.",
-            },
-            {
-                "title": "2. Language Processing",
-                "module": "enrich_comments.py",
-                "description": "Normalize comment text, detect the dominant language, and prepare consistent text for downstream analysis.",
-            },
-            {
-                "title": "3. Sentiment Scoring",
-                "module": "enrich_comments.py",
-                "description": "Run the language-specific sentiment models and classify comments as positive, neutral, or negative.",
-            },
-            {
-                "title": "4. Dataset Assembly",
-                "module": "explorer_analysis.py",
-                "description": "Group enriched rows into post-level and language-level structures for chart-ready output.",
-            },
-            {
-                "title": "5. Insight Views",
-                "module": "explorer.html / advanced_analysis.html",
-                "description": "Render exploratory charts, direct row previews, and drill-downs from the enriched dataset.",
-            },
-        ],
-        "implementation_notes": [
-            "Use the `Comments` table as the source of truth for filtering and retrieval.",
-            "Move heavy processing into explicit backend stages or precomputed tables.",
-            "Keep chart clicks connected to raw comments for validation.",
-            "Use the FAQ page as product and technical reference for future contributors.",
-        ],
-        "advanced_filters": [
-            {
-                "name": "Page name",
-                "meaning": "Restricts the dataset to one or more display names from `EnrichedComments.PageName`.",
-            },
-            {
-                "name": "Page id",
-                "meaning": "Restricts the dataset to one or more stable page identifiers from `EnrichedComments.PageID`.",
-            },
-            {
-                "name": "Source",
-                "meaning": "Keeps only rows loaded from the selected ingestion source or loader lineage value.",
-            },
-            {
-                "name": "Main language",
-                "meaning": "Limits rows to comments whose detected dominant language matches the selected values.",
-            },
-            {
-                "name": "Sentiment",
-                "meaning": "Filters individual comments by their own sentiment label: positive, neutral, or negative.",
-            },
-            {
-                "name": "Post description sentiment",
-                "meaning": "Filters posts by the sentiment of the first comment in the full unfiltered post, used as the post anchor.",
-            },
-            {
-                "name": "Minimum comment likes",
-                "meaning": "Keeps only comments whose `CommentLikes` value is greater than or equal to the chosen threshold.",
-            },
-            {
-                "name": "Post time from / to",
-                "meaning": "Restricts the subset by the publication time of the post itself, not the comment time.",
-            },
-            {
-                "name": "Comment time from / to",
-                "meaning": "Restricts the subset by when the comment was created, useful for response-window analysis.",
-            },
-            {
-                "name": "Comment text search",
-                "meaning": "Matches rows where the raw comment text or filtered comment text contains the given phrase or keyword.",
-            },
-        ],
-    }
-
     return render_template(
         'faq.html',
         current_user=current_user,
-        page_sections=page_sections,
-        faq_reference=faq_reference,
+        page_sections=PAGE_SECTIONS,
+        faq_reference=FAQ_REFERENCE,
     )
 
 
@@ -825,80 +750,12 @@ def process_data_endpoint():
         if number_of_posts <= 0:
             return jsonify({'error': 'Number of posts must be greater than zero.'}), 400
 
-        instagram_credentials = fetch_user_instagram_credentials(current_user)
-        if not instagram_credentials:
-            return jsonify({'error': 'Logged in user was not found.'}), 404
+        if app.config['ENABLE_BACKGROUND_JOBS']:
+            job_id = job_queue.submit(_run_process_data, current_user, params)
+            return _job_response(job_id)
 
-        instagram_username = instagram_credentials.get('instagram_login')
-        instagram_password = instagram_credentials.get('instagram_password')
-
-        if not instagram_username or not instagram_password:
-            return jsonify({'error': 'Instagram credentials are missing for the logged in user.'}), 400
-
-        existing_post_hrefs = fetch_existing_post_hrefs(target_page)
-        logger.debug(
-            "Found %s existing post hrefs for page_id=%s before extraction",
-            len(existing_post_hrefs),
-            target_page,
-        )
-
-        extraction_result = extract_data(
-            instagram_username,
-            instagram_password,
-            target_page,
-            number_of_posts,
-            existing_post_hrefs=existing_post_hrefs,
-            app_username=current_user,
-            headless_session_only=headless_session_only,
-        )
-        if extraction_result.get('aborted_reason'):
-            return jsonify(
-                {
-                    'error': extraction_result['aborted_reason'],
-                    'result': extraction_result,
-                }
-            ), 409
-        if extraction_result.get('new_posts_found', 0) == 0:
-            return jsonify(
-                {
-                    'success': True,
-                    'result': {
-                        'target_page': target_page,
-                        'posts_requested': number_of_posts,
-                        'posts_loaded': 0,
-                        'comments_collected': 0,
-                        'rows_loaded_to_db': 0,
-                        'files_processed': 0,
-                        'message': 'No new posts found. Existing database posts were skipped.',
-                    }
-                }
-            ), 200
-        if extraction_result.get('posts_loaded', 0) == 0 or not extraction_result.get('saved_files'):
-            return jsonify(
-                {
-                    'error': 'Extraction did not produce any files.',
-                    'result': extraction_result,
-                }
-            ), 502
-
-        logger.debug("Starting load_to_db after extract_data")
-        load_result = load_to_db(dry_run=False)
-        logger.debug("load_to_db finished")
-
-
-        return jsonify(
-            {
-                'success': True,
-                'result': {
-                    'target_page': target_page,
-                    'posts_requested': number_of_posts,
-                    'posts_loaded': extraction_result.get('posts_loaded', 0),
-                    'comments_collected': extraction_result.get('comments_collected', 0),
-                    'rows_loaded_to_db': load_result.get('rows_loaded', 0),
-                    'files_processed': load_result.get('files_processed', 0),
-                }
-            }
-        ), 200
+        payload, status_code = _run_process_data(current_user, params)
+        return jsonify(payload), status_code
     except Exception:
         logger.exception("process-data failed")
         return _internal_error_response('Process-data request failed.')
@@ -920,19 +777,12 @@ def enrich_comments_endpoint():
         page_name = data.get('page_name')
         page_id = data.get('page_id')
 
-        result = enrich_comments(mode=mode, page_name=page_name, page_id=page_id)
-        logger.info(
-            "enrich-comments finished: mode=%s selected=%s processed=%s added=%s updated=%s deleted=%s page_name=%s page_id=%s",
-            result.get('mode'),
-            result.get('selected'),
-            result.get('processed'),
-            result.get('added_count', 0),
-            result.get('updated_count', 0),
-            result.get('deleted', 0),
-            result.get('page_name'),
-            result.get('page_id'),
-        )
-        return jsonify({'success': True, 'result': result}), 200
+        if app.config['ENABLE_BACKGROUND_JOBS']:
+            job_id = job_queue.submit(_run_enrich_comments, mode, page_name, page_id)
+            return _job_response(job_id)
+
+        payload, status_code = _run_enrich_comments(mode, page_name=page_name, page_id=page_id)
+        return jsonify(payload), status_code
     except Exception:
         logger.exception("enrich-comments failed")
         return _internal_error_response('Enrich-comments request failed.')

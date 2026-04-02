@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from tests.support.app_test_case import AppTestCase, app_module
 
@@ -34,14 +34,15 @@ class ProcessFlowRouteTests(AppTestCase):
                     "new_posts_found": 2,
                     "posts_loaded": 2,
                     "comments_collected": 11,
-                    "saved_files": ["one.csv"],
+                    "rows_loaded_to_db": 11,
+                    "batches_loaded_to_db": 2,
                 },
-                "load_result": {"rows_loaded": 11, "files_processed": 1},
                 "expected_status": 200,
-                "assertions": lambda response, mocked_load: (
+                "assertions": lambda response, mocked_loader: (
                     self.assertTrue(response.get_json()["success"]),
                     self.assertEqual(response.get_json()["result"]["rows_loaded_to_db"], 11),
-                    mocked_load.assert_called_once_with(dry_run=False),
+                    self.assertEqual(response.get_json()["result"]["files_processed"], 2),
+                    mocked_loader.assert_not_called(),
                 ),
             },
             {
@@ -49,11 +50,10 @@ class ProcessFlowRouteTests(AppTestCase):
                 "payload": {"params": {"param1": "arthaslav", "param2": "3"}},
                 "credentials": {"instagram_login": "insta", "instagram_password": "secret"},
                 "extract_result": {"new_posts_found": 0},
-                "load_result": {"rows_loaded": 999, "files_processed": 9},
                 "expected_status": 200,
-                "assertions": lambda response, mocked_load: (
+                "assertions": lambda response, mocked_loader: (
                     self.assertIn("No new posts found", response.get_json()["result"]["message"]),
-                    mocked_load.assert_not_called(),
+                    mocked_loader.assert_not_called(),
                 ),
             },
             {
@@ -61,14 +61,13 @@ class ProcessFlowRouteTests(AppTestCase):
                 "payload": {"params": {"param1": "arthaslav", "param2": "3"}},
                 "credentials": {"instagram_login": "insta", "instagram_password": "secret"},
                 "extract_result": {"aborted_reason": "Instagram flagged the session for suspected automation."},
-                "load_result": {"rows_loaded": 999, "files_processed": 9},
                 "expected_status": 409,
-                "assertions": lambda response, mocked_load: (
+                "assertions": lambda response, mocked_loader: (
                     self.assertEqual(
                         response.get_json()["error"],
                         "Instagram flagged the session for suspected automation.",
                     ),
-                    mocked_load.assert_not_called(),
+                    mocked_loader.assert_not_called(),
                 ),
             },
             {
@@ -76,14 +75,13 @@ class ProcessFlowRouteTests(AppTestCase):
                 "payload": {"params": {"param1": "arthaslav", "param2": "3"}},
                 "credentials": {"instagram_login": "", "instagram_password": ""},
                 "extract_result": {},
-                "load_result": {},
                 "expected_status": 400,
-                "assertions": lambda response, mocked_load: (
+                "assertions": lambda response, mocked_loader: (
                     self.assertEqual(
                         response.get_json()["error"],
                         "Instagram credentials are missing for the logged in user.",
                     ),
-                    mocked_load.assert_not_called(),
+                    mocked_loader.assert_not_called(),
                 ),
             },
         ]
@@ -102,8 +100,8 @@ class ProcessFlowRouteTests(AppTestCase):
                 ), patch.object(
                     app_module, "extract_data", return_value=scenario["extract_result"]
                 ) as mocked_extract, patch.object(
-                    app_module, "load_to_db", return_value=scenario["load_result"]
-                ) as mocked_load:
+                    app_module, "load_row_batches"
+                ) as mocked_loader:
                     response = self.client.post(
                         "/process-data",
                         json=scenario["payload"],
@@ -120,8 +118,9 @@ class ProcessFlowRouteTests(AppTestCase):
                         existing_post_hrefs=["href-1"],
                         app_username="alice",
                         headless_session_only=False,
+                        comment_batch_handler=ANY,
                     )
-                scenario["assertions"](response, mocked_load)
+                scenario["assertions"](response, mocked_loader)
 
     def test_process_data_passes_headless_session_flag(self):
         self.set_access_cookie("alice")
@@ -134,9 +133,9 @@ class ProcessFlowRouteTests(AppTestCase):
         ), patch.object(
             app_module,
             "extract_data",
-            return_value={"new_posts_found": 1, "posts_loaded": 1, "comments_collected": 2, "saved_files": ["one.csv"]},
+            return_value={"new_posts_found": 1, "posts_loaded": 1, "comments_collected": 2, "rows_loaded_to_db": 2, "batches_loaded_to_db": 1},
         ) as mocked_extract, patch.object(
-            app_module, "load_to_db", return_value={"rows_loaded": 2, "files_processed": 1}
+            app_module, "load_row_batches"
         ):
             response = self.client.post(
                 "/process-data",
@@ -153,6 +152,7 @@ class ProcessFlowRouteTests(AppTestCase):
             existing_post_hrefs=["href-1"],
             app_username="alice",
             headless_session_only=True,
+            comment_batch_handler=ANY,
         )
 
     def test_process_data_endpoint_validates_request_payload(self):
@@ -198,8 +198,8 @@ class ProcessFlowRouteTests(AppTestCase):
                 ) as mocked_existing, patch.object(
                     app_module, "extract_data"
                 ) as mocked_extract, patch.object(
-                    app_module, "load_to_db"
-                ) as mocked_load:
+                    app_module, "load_row_batches"
+                ) as mocked_loader:
                     response = self.client.post(
                         "/process-data",
                         json=scenario["payload"],
@@ -211,7 +211,7 @@ class ProcessFlowRouteTests(AppTestCase):
                 mocked_credentials.assert_not_called()
                 mocked_existing.assert_not_called()
                 mocked_extract.assert_not_called()
-                mocked_load.assert_not_called()
+                mocked_loader.assert_not_called()
 
     def test_process_data_requires_csrf_header(self):
         self.set_access_cookie("alice")
@@ -240,10 +240,10 @@ class ProcessFlowRouteTests(AppTestCase):
         ), patch.object(
             app_module,
             "extract_data",
-            return_value={"new_posts_found": 1, "posts_loaded": 1, "comments_collected": 2, "saved_files": ["one.csv"]},
+            return_value={"new_posts_found": 1, "posts_loaded": 1, "comments_collected": 2, "rows_loaded_to_db": 2, "batches_loaded_to_db": 1},
         ) as mocked_extract, patch.object(
-            app_module, "load_to_db", return_value={"rows_loaded": 2, "files_processed": 1}
-        ) as mocked_load:
+            app_module, "load_row_batches"
+        ) as mocked_loader:
             first_response = self.client.post(
                 "/process-data",
                 json={"params": {"param1": "arthaslav", "param2": "3"}},
@@ -262,7 +262,7 @@ class ProcessFlowRouteTests(AppTestCase):
             "Too many process-data requests. Please retry later.",
         )
         self.assertEqual(mocked_extract.call_count, 1)
-        self.assertEqual(mocked_load.call_count, 1)
+        self.assertEqual(mocked_loader.call_count, 0)
 
     def test_enrich_comments_endpoint(self):
         scenarios = [
@@ -424,7 +424,6 @@ class ProcessFlowRouteTests(AppTestCase):
         scenarios = [
             {
                 "name": "preview_success",
-                "preview_result": {"rows": [{"CommentHash": "1"}], "total": 1},
                 "rows_result": [{"CommentHash": "1"}],
                 "analysis_result": {"summary": {"total_comments": 1}},
                 "expected_status": 200,
@@ -434,8 +433,7 @@ class ProcessFlowRouteTests(AppTestCase):
             },
             {
                 "name": "preview_handles_backend_failure",
-                "preview_result": RuntimeError("preview failed"),
-                "rows_result": [],
+                "rows_result": RuntimeError("rows failed"),
                 "analysis_result": {},
                 "expected_status": 500,
                 "assertions": lambda response: self.assertEqual(
@@ -449,16 +447,20 @@ class ProcessFlowRouteTests(AppTestCase):
                 self.client = self.app.test_client()
                 app_module.clear_rate_limit_state()
                 self.set_access_cookie("alice")
-                if isinstance(scenario["preview_result"], Exception):
-                    preview_patch = patch.object(
-                        app_module, "fetch_enriched_comment_preview", side_effect=scenario["preview_result"]
+                if isinstance(scenario["rows_result"], Exception):
+                    rows_patch = patch.object(
+                        app_module, "fetch_enriched_comment_rows", side_effect=scenario["rows_result"]
                     )
                 else:
-                    preview_patch = patch.object(
-                        app_module, "fetch_enriched_comment_preview", return_value=scenario["preview_result"]
+                    rows_patch = patch.object(
+                        app_module, "fetch_enriched_comment_rows", return_value=scenario["rows_result"]
                     )
 
-                rows_patch = patch.object(app_module, "fetch_enriched_comment_rows", return_value=scenario["rows_result"])
+                preview_patch = patch.object(
+                    app_module,
+                    "build_enriched_comment_preview_from_rows",
+                    return_value={"rows": [{"CommentHash": "1"}]},
+                )
                 build_patch = patch.object(app_module, "build_analysis_from_rows", return_value=scenario["analysis_result"])
                 if scenario["expected_status"] == 500:
                     with preview_patch as mocked_preview, rows_patch, build_patch, patch.object(app_module.logger, "exception"):
@@ -467,7 +469,7 @@ class ProcessFlowRouteTests(AppTestCase):
                             json={"page_ids": ["arthaslav"]},
                             headers=self.make_json_headers(csrf="access"),
                         )
-                        mocked_preview.assert_called_once()
+                        mocked_preview.assert_not_called()
                 else:
                     with preview_patch, rows_patch, build_patch:
                         response = self.client.post(

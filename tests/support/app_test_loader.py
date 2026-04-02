@@ -37,7 +37,7 @@ def _temporary_backend_stubs():
     sys.modules["static.backend.extract_data"] = extract_data_module
 
     load_to_db_module = types.ModuleType("static.backend.load_to_db")
-    load_to_db_module.load_to_db = lambda *args, **kwargs: {}
+    load_to_db_module.load_row_batches = lambda *args, **kwargs: {}
     sys.modules["static.backend.load_to_db"] = load_to_db_module
 
     enrich_comments_module = types.ModuleType("static.backend.enrich_comments")
@@ -79,6 +79,10 @@ def _temporary_backend_stubs():
         lambda *args, **kwargs: {"rows": [], "total": 0}
     )
     db_connection_module.fetch_enriched_comment_rows = lambda *args, **kwargs: []
+    db_connection_module.get_db_connection = lambda *args, **kwargs: None
+    db_connection_module.build_enriched_comment_preview_from_rows = (
+        lambda *args, **kwargs: {"rows": [], "summary": {}, "applied_filters": {}}
+    )
     sys.modules["static.backend.db_connection"] = db_connection_module
     try:
         yield

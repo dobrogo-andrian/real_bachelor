@@ -38,6 +38,19 @@ class FakeCursor:
             return self.fetchall_values.pop(0)
         return list(self.fetchall_values)
 
+    def fetchmany(self, size=None):
+        if self.fetchall_values and isinstance(self.fetchall_values[0], list):
+            return self.fetchall_values.pop(0)
+        if not self.fetchall_values:
+            return []
+        if size is None or size >= len(self.fetchall_values):
+            result = list(self.fetchall_values)
+            self.fetchall_values = []
+            return result
+        result = self.fetchall_values[:size]
+        self.fetchall_values = self.fetchall_values[size:]
+        return result
+
     def setinputsizes(self, input_sizes):
         self.input_sizes = input_sizes
 

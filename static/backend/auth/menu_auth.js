@@ -9,10 +9,12 @@
     if (!listItem) {
       return null;
     }
+
     const link = listItem.querySelector('a');
     if (!link) {
       return null;
     }
+
     link.href = href;
     link.textContent = label;
     link.removeAttribute('id');
@@ -26,10 +28,15 @@
 
   async function handleLogout(event) {
     event.preventDefault();
-    const response = await session.fetchWithCsrf('/logout', { method: 'POST' });
-    if (response.ok) {
-      session.clearSessionCookies();
-      window.location.replace('/');
+
+    try {
+      const response = await session.fetchWithCsrf('/logout', { method: 'POST' });
+      if (response.ok) {
+        session.clearSessionCookies();
+        window.location.replace('/');
+      }
+    } catch (error) {
+      console.error('Failed to log out from menu:', error);
     }
   }
 
@@ -51,20 +58,22 @@
 
   async function syncMenu() {
     renderLoggedOutState();
+
+    if (!session) {
+      return;
+    }
+
     try {
-      const response = await fetch('/user-info', {
+      const response = await session.fetchWithCsrf('/user-info', {
         method: 'GET',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-        },
+        headers: { Accept: 'application/json' },
       });
 
       if (!response.ok) {
         return;
       }
 
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({}));
       if (!payload.username) {
         return;
       }

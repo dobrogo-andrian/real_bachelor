@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import tempfile
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
@@ -69,26 +68,6 @@ class ExtractDataTests(unittest.TestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(attempts["count"], 3)
         self.assertEqual(mocked_pause.call_count, 2)
-
-    def test_delete_previos_files(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            working_dir = os.getcwd()
-            os.chdir(temp_dir)
-            try:
-                target_dir = os.path.join(temp_dir, "unprocessed_data")
-                os.makedirs(os.path.join(target_dir, "nested"), exist_ok=True)
-                with open(os.path.join(target_dir, "old.csv"), "w", encoding="utf-8") as handle:
-                    handle.write("data")
-                with open(os.path.join(target_dir, "nested", "inside.csv"), "w", encoding="utf-8") as handle:
-                    handle.write("data")
-
-                with redirect_stdout(io.StringIO()):
-                    extract_module.delete_previos_files()
-
-                self.assertTrue(os.path.isdir(target_dir))
-                self.assertEqual(os.listdir(target_dir), [])
-            finally:
-                os.chdir(working_dir)
 
     def test_setup_driver(self):
         fake_options_instance = MagicMock()
@@ -356,10 +335,9 @@ class ExtractDataTests(unittest.TestCase):
         self.assertTrue(button.clicked)
         self.assertFalse(missing)
 
-    def test_save_comments(self):
+    def test_collect_post_comment_rows(self):
         driver = FakeDriver()
-        fake_dataframe = MagicMock()
-        fake_pd = SimpleNamespace(DataFrame=MagicMock(return_value=fake_dataframe))
+        prepared_rows = [{"CommentHash": "hash-1"}]
 
         with patch.object(extract_module, "wait_for_post_content"), patch.object(
             extract_module, "human_pause"
@@ -368,11 +346,9 @@ class ExtractDataTests(unittest.TestCase):
         ), patch.object(
             extract_module, "collect_comments_and_likes", return_value=[("Nice", "2024-01-01T10:00:00", 3)]
         ), patch.object(
-            extract_module, "get_next_filename", return_value="unprocessed_data/comments1/arthaslav_1.csv"
-        ), patch.object(
-            extract_module, "pd", fake_pd
+            extract_module, "prepare_rows_from_comment_records", return_value=prepared_rows
         ), redirect_stdout(io.StringIO()):
-            result = extract_module.save_comments(
+            result = extract_module.collect_post_comment_rows(
                 driver,
                 "https://instagram.com/p/1",
                 "arthaslav",
@@ -380,9 +356,7 @@ class ExtractDataTests(unittest.TestCase):
             )
 
         self.assertEqual(result["comments_collected"], 1)
-        self.assertEqual(result["output_path"], "unprocessed_data/comments1/arthaslav_1.csv")
-        fake_dataframe.insert.assert_any_call(0, "PageName", "Artha Slav")
-        fake_dataframe.to_csv.assert_called_once()
+        self.assertEqual(result["rows"], prepared_rows)
 
     def test_find_scroll_elements_by_scroll_properties(self):
         driver = FakeDriver()
@@ -473,10 +447,13 @@ class ExtractDataTests(unittest.TestCase):
 
     def test_extract_data(self):
         fake_driver = FakeDriver()
+        persisted_batches = []
 
-        with patch.object(extract_module, "delete_previos_files"), patch.object(
-            extract_module, "setup_driver", return_value=fake_driver
-        ), patch.object(
+        def fake_handler(rows):
+            persisted_batches.append(rows)
+            return len(rows)
+
+        with patch.object(extract_module, "setup_driver", return_value=fake_driver), patch.object(
             extract_module, "human_pause"
         ), patch.object(
             extract_module, "wait_for_document_ready"
@@ -490,8 +467,8 @@ class ExtractDataTests(unittest.TestCase):
             extract_module, "load_all_posts", return_value=(["https://www.instagram.com/p/1"], "Artha Slav")
         ), patch.object(
             extract_module,
-            "save_comments",
-            return_value={"output_path": "unprocessed_data/comments1/arthaslav_1.csv", "comments_collected": 4},
+            "collect_post_comment_rows",
+            return_value={"rows": [{"CommentHash": "hash-1"}], "comments_collected": 4},
         ), redirect_stdout(io.StringIO()):
             result = extract_module.extract_data(
                 "alice",
@@ -500,6 +477,7 @@ class ExtractDataTests(unittest.TestCase):
                 1,
                 existing_post_hrefs={"https://www.instagram.com/p/existing"},
                 app_username="app-alice",
+                comment_batch_handler=fake_handler,
             )
 
         self.assertEqual(result["target_page"], "arthaslav")
@@ -507,7 +485,9 @@ class ExtractDataTests(unittest.TestCase):
         self.assertEqual(result["new_posts_found"], 1)
         self.assertEqual(result["posts_loaded"], 1)
         self.assertEqual(result["comments_collected"], 4)
-        self.assertEqual(result["saved_files"], ["unprocessed_data/comments1/arthaslav_1.csv"])
+        self.assertEqual(result["rows_loaded_to_db"], 1)
+        self.assertEqual(result["batches_loaded_to_db"], 1)
+        self.assertEqual(persisted_batches, [[{"CommentHash": "hash-1"}]])
         self.assertTrue(fake_driver.refreshed)
         self.assertTrue(fake_driver.quit_called)
 
@@ -515,9 +495,7 @@ class ExtractDataTests(unittest.TestCase):
         fake_driver = FakeDriver()
         fake_driver.page_source = "automated actions"
 
-        with patch.object(extract_module, "delete_previos_files"), patch.object(
-            extract_module, "setup_driver", return_value=fake_driver
-        ), patch.object(
+        with patch.object(extract_module, "setup_driver", return_value=fake_driver), patch.object(
             extract_module, "human_pause"
         ), patch.object(
             extract_module, "wait_for_document_ready"
@@ -537,9 +515,7 @@ class ExtractDataTests(unittest.TestCase):
     def test_extract_data_aborts_headless_session_only_when_cookies_missing(self):
         fake_driver = FakeDriver()
 
-        with patch.object(extract_module, "delete_previos_files"), patch.object(
-            extract_module, "setup_driver", return_value=fake_driver
-        ), patch.object(
+        with patch.object(extract_module, "setup_driver", return_value=fake_driver), patch.object(
             extract_module, "human_pause"
         ), patch.object(
             extract_module, "wait_for_document_ready"

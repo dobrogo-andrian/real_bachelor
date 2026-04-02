@@ -7,9 +7,9 @@ This document reflects the current repository layout and the responsibilities of
 - `app.py` is the Flask entrypoint and the orchestration layer.
 - `templates/` contains the rendered HTML pages.
 - `static/assets/` contains the base frontend theme and styling assets.
-- `static/backend/` contains the Python data pipeline plus some page-specific JavaScript.
+- `static/backend/` contains the Python data pipeline plus auth/page support scripts.
 - `ddl/` contains SQL Server schema files.
-- `unprocessed_data/` stores generated runtime artifacts.
+- `model_fine_tuning/` contains fine-tuning and dataset-preparation scripts.
 
 ## Top-level tree
 
@@ -25,13 +25,31 @@ real_bachelor/
 |-- ddl/
 |   |-- Comments.sql
 |   |-- EnrichedComments.sql
+|   |-- migrations/
 |   |-- Users_AddInstagramCookies.sql
 |   `-- Users.sql
+|-- model_fine_tuning/
+|   |-- common.py
+|   |-- prepare_and_balance_data.py
+|   |-- train_lora_sentiment.py
+|   |-- balanced_sentiment_dataset/
+|   |-- sentiment_lora_adapters/
+|   |-- Sp1786-multiclass-sentiment-analysis-dataset/
+|   |-- ukr-detect-ukr-emotions-binary/
+|   `-- symbols/
 |-- static/
 |   |-- assets/
 |   |   |-- css/
+|   |   |   |-- advanced-analysis-page.css
+|   |   |   |-- explorer-page.css
+|   |   |   |-- extractor.css
+|   |   |   |-- login.css
+|   |   |   `-- signup.css
 |   |   |-- images/
 |   |   |-- js/
+|   |   |   |-- advanced-analysis-page.js
+|   |   |   |-- explorer-page.js
+|   |   |   `-- extractor.js
 |   |   |-- sass/
 |   |   `-- webfonts/
 |   `-- backend/
@@ -40,12 +58,15 @@ real_bachelor/
 |       |-- enrich_comments.py
 |       |-- explorer_analysis.py
 |       |-- extract_data.py
+|       |-- faq_content.py
+|       |-- job_queue.py
 |       |-- load_to_db.py
 |       |-- auth/
-|       |   |-- auth.js
+|       |   |-- account.js
 |       |   |-- faq.js
 |       |   |-- home.js
 |       |   |-- login.js
+|       |   |-- menu_auth.js
 |       |   `-- signup.js
 |       `-- __pycache__/
 |-- templates/
@@ -59,12 +80,6 @@ real_bachelor/
 |   |-- login.html
 |   |-- signup.html
 |   `-- test.html
-|-- unprocessed_data/
-|   `-- comments1/
-|       |-- arthaslav_1.csv
-|       |-- arthaslav_2.csv
-|       |-- ...
-|       `-- arthaslav_50.csv
 `-- __pycache__/
 ```
 
@@ -77,7 +92,7 @@ Responsibilities:
 - configures Flask, CORS, and JWT cookie authentication
 - serves public and protected HTML pages
 - exposes API endpoints for extraction, enrichment, and analysis
-- coordinates `extract_data`, `load_to_db`, `enrich_comments`, and explorer analysis helpers
+- coordinates `extract_data`, `load_to_db`, `enrich_comments`, job polling, and explorer analysis helpers
 
 Main route groups:
 
@@ -86,6 +101,7 @@ Main route groups:
 - data APIs:
   - `/process-data`
   - `/enrich-comments`
+  - `/jobs/<job_id>`
   - `/page-analysis`
   - `/api/advanced-analysis/preview`
   - `/api/advanced-analysis/analyze`
@@ -98,11 +114,10 @@ Responsibilities:
 - restores a stored Instagram session or waits for manual browser login
 - loads posts from a target page
 - opens comment sections, scrolls, and extracts comment text plus likes
-- writes CSV files for downstream loading
+- prepares one in-memory row batch per post for immediate loading through a callback
 
 Important details:
 
-- runtime output is written under `unprocessed_data/`
 - per-user Instagram session cookies are stored in the `Users` table as encrypted, signed JSON payloads
 - extraction aborts when Instagram presents an account restriction or challenge page
 - the manual `__main__` block resolves Instagram credentials for the selected app user
@@ -111,35 +126,42 @@ Important details:
 
 Responsibilities:
 
-- walks `unprocessed_data/` recursively for CSV files
+- accepts prepared row batches for direct SQL loading
+- still supports explicit CSV imports when a caller provides an input folder
 - validates required input columns
 - derives stable comment hashes
 - prepares comment rows for SQL Server
-- merges data into `[dbo].[Comments]`
+- stages and merges data into `[dbo].[Comments]`
 
 Important details:
 
-- default input folder is the repository-level `unprocessed_data/`
 - `dry_run=True` is supported for non-writing checks
+- large row sets are chunked and staged through temp tables on SQL Server
 
 ### `static/backend/enrich_comments.py`
 
 Responsibilities:
 
 - fetches raw rows from `Comments`
+- streams rows in batches rather than materializing the full source set
 - normalizes text and datetimes
 - detects dominant language
-- filters text for language-specific processing
-- loads transformer models
-- assigns sentiment labels
+- loads and caches the merged LoRA sentiment model
+- assigns sentiment labels with batch inference
 - clears or refreshes scoped enrichment targets
-- upserts rows into `EnrichedComments`
+- upserts rows into `EnrichedComments` through a staging table
 
 Supported enrichment scope:
 
 - whole database
 - selected page name
 - selected page id
+- delta-only insert of comments not yet present in `EnrichedComments`
+
+Important details:
+
+- uses separate read and write DB connections during chunked enrichment to avoid ODBC function-sequence errors
+- loads the sentiment model lazily only after the first non-empty batch is discovered
 
 ### `static/backend/explorer_analysis.py`
 
@@ -168,7 +190,18 @@ Responsibilities:
 Important details:
 
 - assumes SQL Server is available on `localhost`
-- currently uses hardcoded DB credentials in source
+- connection settings are provided through environment variables loaded at app startup
+
+### `static/backend/job_queue.py`
+
+Responsibilities:
+
+- provides the in-process background job queue used by `/process-data` and `/enrich-comments`
+- stores job status, timestamps, payloads, and error text for `/jobs/<job_id>`
+
+Important details:
+
+- jobs are process-local and not durable across restarts
 
 ### `static/backend/common_utils.py`
 
@@ -200,6 +233,7 @@ These scripts support page-level frontend behavior such as:
 - signup submission
 - landing page auth-aware behavior
 - FAQ page behavior
+- shared menu/session behavior for authenticated pages
 
 The folder name is historical; it now contains more than authentication-only logic.
 
@@ -207,11 +241,25 @@ The folder name is historical; it now contains more than authentication-only log
 
 Theme and UI assets derived from HTML5UP "Forty":
 
-- `css/`: compiled stylesheets plus project-specific overrides
-- `js/`: theme JavaScript
+- `css/`: compiled stylesheets plus project-specific page styles
+- `js/`: theme JavaScript plus extracted page scripts such as `extractor.js`, `explorer-page.js`, and `advanced-analysis-page.js`
 - `images/`: theme images
 - `sass/`: source styles
 - `webfonts/`: bundled icon fonts
+
+### `model_fine_tuning/`
+
+Responsibilities:
+
+- downloads or normalizes sentiment datasets
+- prepares balanced training CSVs
+- trains LoRA adapters for the sentiment model
+- stores generated adapters, checkpoints, and helper datasets
+
+Important details:
+
+- CSV is the default dataset export format; Hugging Face Arrow disk exports are opt-in
+- `symbols/generation.py` is now a CLI-style generator and no longer writes files on import
 
 ## Database schema files
 
@@ -248,7 +296,7 @@ Defines the processed analysis table with:
 
 - the original comment identity fields
 - `MainLanguage`
-- `FilteredComment`
+- `NormalizedComment`
 - `Sentiment`
 - processing timestamps
 - source tracking
@@ -261,11 +309,6 @@ It also includes:
 
 ## Generated and runtime data
 
-### `unprocessed_data/`
-
-- stores raw CSV files produced by the scraper
-- current sample content: `comments1/arthaslav_1.csv` through `comments1/arthaslav_50.csv`
-
 ### `__pycache__/`
 
 - generated Python bytecode caches
@@ -274,5 +317,5 @@ It also includes:
 ## Current project state notes
 
 - The repository also contains IDE metadata under `.idea/`.
-- The repository worktree includes generated files such as `__pycache__/` and extraction output.
-- Authentication and database configuration are functional for local development but still rely on hardcoded secrets/settings in source files.
+- The repository worktree includes generated files such as `__pycache__/`.
+- The repository includes generated training artifacts under `model_fine_tuning/sentiment_lora_adapters/`.

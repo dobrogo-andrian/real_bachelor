@@ -1,60 +1,70 @@
 /* login.css */
 .login-container {
+  min-height: 100vh;
+  min-height: 100svh;
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
+  padding: 2rem 1rem;
 }
 
 .login-form {
-    padding: 20px;
-    border-radius: 10px;
-    width: 20vw;
-    height: 80vh;
-    display: flex;
-    flex-direction: column;
-    min-width: 300px ;
-    min-height: 350px;
-    margin-top: 15vh;
-    /*margin-bottom: auto;*/
+  box-sizing: border-box;
+  width: min(100%, 30rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 2rem;
+  border-radius: 1rem;
 }
-button{
-    margin-bottom: 10px;
-}
-#password{
-    margin-bottom: 50px;
-}
-#username{
-    margin-bottom: 30px;
-}
+
 .login-form h1 {
   text-align: center;
+  margin-bottom: 0.5rem;
 }
 
 .login-form label {
-  margin-bottom: 5px;
+  margin-bottom: 0.25rem;
 }
 
 .login-form input {
-    margin-bottom: 20px;
-    padding: 10px;
-    border: 1px solid;
-    border-radius: 5px;
-    min-height: 50px;
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid;
+  border-radius: 0.5rem;
+  min-height: 3.2rem;
 }
 
+.login-form .button {
+  width: 100%;
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+}
 
 .login-links {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
   text-align: center;
-  margin-top: 20px;
+  margin-top: 1rem;
 }
 
 .login-links a {
   text-decoration: none;
-  margin-right: 10px;
 }
 
 .error {
-  margin-bottom: 15px;
+  margin-bottom: 0.5rem;
   text-align: center;
+}
+
+@media screen and (max-width: 480px) {
+  .login-container {
+    padding: 1rem 0.75rem;
+  }
+
+  .login-form {
+    padding: 1.5rem 1rem;
+  }
 }

@@ -2,7 +2,7 @@ CREATE TABLE [dbo].[EnrichedComments](
     [CommentHash] [char](64) NOT NULL,
     [PageName] [nvarchar](100) NOT NULL,
     [PageID] [nvarchar](100) NOT NULL,
-    [PostHref] [nvarchar](max) NULL,
+    [PostHref] [nvarchar](2048) NULL,
     [PostTime] [datetime2](0) NULL,
     [CommentTime] [datetime2](0) NULL,
     [CommentOrder] [int] NULL,
@@ -23,17 +23,49 @@ CONSTRAINT [CK_EnrichedComments_Sentiment] CHECK ([Sentiment] IN (N'positive', N
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
 GO
 
-CREATE NONCLUSTERED INDEX [IX_EnrichedComments_PageName]
-ON [dbo].[EnrichedComments] ([PageName] ASC)
+CREATE NONCLUSTERED INDEX [IX_EnrichedComments_PageName_PostWindow]
+ON [dbo].[EnrichedComments] (
+    [PageName] ASC,
+    [PostTime] DESC,
+    [CommentTime] DESC,
+    [CommentHash] ASC
+)
+INCLUDE ([PageID], [CommentOrder], [CommentLikes], [MainLanguage], [Sentiment], [ProcessedTime], [Source])
 ON [PRIMARY]
 GO
 
-CREATE NONCLUSTERED INDEX [IX_EnrichedComments_PageID]
-ON [dbo].[EnrichedComments] ([PageID] ASC)
+CREATE NONCLUSTERED INDEX [IX_EnrichedComments_PageID_PostWindow]
+ON [dbo].[EnrichedComments] (
+    [PageID] ASC,
+    [PostTime] DESC,
+    [CommentTime] DESC,
+    [CommentHash] ASC
+)
+INCLUDE ([PageName], [CommentOrder], [CommentLikes], [MainLanguage], [Sentiment], [ProcessedTime], [Source])
 ON [PRIMARY]
 GO
 
-CREATE NONCLUSTERED INDEX [IX_EnrichedComments_Sentiment]
-ON [dbo].[EnrichedComments] ([Sentiment] ASC)
+CREATE NONCLUSTERED INDEX [IX_EnrichedComments_PostAnchor]
+ON [dbo].[EnrichedComments] (
+    [PageID] ASC,
+    [PageName] ASC,
+    [PostTime] ASC,
+    [CommentTime] ASC,
+    [CommentHash] ASC
+)
+INCLUDE ([Sentiment])
+ON [PRIMARY]
+GO
+
+CREATE NONCLUSTERED INDEX [IX_EnrichedComments_Source_Language_Sentiment]
+ON [dbo].[EnrichedComments] (
+    [Source] ASC,
+    [MainLanguage] ASC,
+    [Sentiment] ASC,
+    [PostTime] DESC,
+    [CommentTime] DESC,
+    [CommentHash] ASC
+)
+INCLUDE ([PageID], [PageName], [CommentLikes], [ProcessedTime])
 ON [PRIMARY]
 GO

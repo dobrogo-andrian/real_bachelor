@@ -19,9 +19,14 @@
     document.getElementById('analyze_whole_db'),
     document.getElementById('analyze_delta'),
   ];
+  const extractionButtons = [
+    document.getElementById('start_execution'),
+    document.getElementById('start_headless_execution'),
+  ];
   let processingDimensions = null;
   let pendingAnalysisMode = null;
   let pendingAnalysisLabel = null;
+  let extractionInProgress = false;
 
   async function loadManualLoginHint() {
     try {
@@ -57,6 +62,73 @@
       button.disabled = disabled;
     });
     processingSubmitButton.disabled = disabled;
+  }
+
+  function setExtractionButtonsDisabled(disabled) {
+    extractionButtons.forEach((button) => {
+      if (button) {
+        button.disabled = disabled;
+      }
+    });
+  }
+
+  function setExtractionInProgress(active) {
+    extractionInProgress = active;
+    setExtractionButtonsDisabled(active);
+    setProcessingButtonsDisabled(active);
+  }
+
+  async function pollJob(jobId) {
+    while (true) {
+      const rawResponse = await session.fetchWithCsrf(`/jobs/${jobId}`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      const response = await session.ensureAuthenticatedResponse(rawResponse);
+      if (!response) {
+        return null;
+      }
+
+      const job = await response.json();
+      if (!response.ok) {
+        throw new Error(job.error || 'Failed to fetch job status.');
+      }
+
+      if (job.status === 'completed') {
+        return job.result;
+      }
+
+      if (job.status === 'failed') {
+        throw new Error(job.error || 'Background job failed.');
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+  }
+
+  async function parseApiResult(response) {
+    const responseData = await response.json();
+    if (response.status === 202 && responseData.job_id) {
+      return pollJob(responseData.job_id);
+    }
+    return responseData;
+  }
+
+  function unpackJobResult(data) {
+    if (Array.isArray(data) && data.length >= 1) {
+      return {
+        payload: data[0],
+        statusCode: data.length > 1 ? data[1] : 200,
+      };
+    }
+
+    return {
+      payload: data,
+      statusCode: 200,
+    };
   }
 
   function scrollToAnalysisResults() {
@@ -157,6 +229,13 @@
   }
 
   async function runAnalysis(mode, optionLabel) {
+    if (extractionInProgress) {
+      analysisStatusText.textContent = 'Wait until post loading finishes before running enrichment.';
+      analysisResultOutput.textContent = 'Extraction is still running.';
+      scrollToAnalysisResults();
+      return;
+    }
+
     const payload = {
       mode: mode,
       page_name: processingPageNameInput.value.trim(),
@@ -183,13 +262,14 @@
         return;
       }
 
-      const responseData = await response.json();
-      if (!response.ok) {
-        throw new Error(responseData.error || 'Failed to run enrichment.');
+      const responseData = await parseApiResult(response);
+      const result = unpackJobResult(responseData);
+      if (result.statusCode >= 400 || !result.payload || result.payload.success === false) {
+        throw new Error((result.payload && result.payload.error) || 'Failed to run enrichment.');
       }
 
       analysisStatusText.textContent = `Analysis completed for ${optionLabel}.`;
-      analysisResultOutput.textContent = JSON.stringify(responseData.result, null, 2);
+      analysisResultOutput.textContent = JSON.stringify(result.payload.result, null, 2);
     } catch (error) {
       analysisStatusText.textContent = `Analysis failed for ${optionLabel}.`;
       analysisResultOutput.textContent = error.message;
@@ -199,6 +279,7 @@
   }
 
   async function runExtraction(headlessSessionOnly) {
+    setExtractionInProgress(true);
     const param1 = document.getElementById('instagram_page').value;
     const param2 = document.getElementById('number_of_posts').value;
     const payload = {
@@ -224,22 +305,25 @@
         return;
       }
 
-      if (response.ok) {
-        const data = await response.json();
+      const data = await parseApiResult(response);
+      const result = unpackJobResult(data);
+
+      if (result.statusCode < 400 && result.payload && result.payload.success) {
         document.getElementById('response-p').textContent = [
-          `Target page: ${data.result.target_page}`,
-          `Posts requested: ${data.result.posts_requested}`,
-          `Posts successfully loaded: ${data.result.posts_loaded}`,
-          `Comments collected: ${data.result.comments_collected}`,
-          `Rows loaded into DB: ${data.result.rows_loaded_to_db}`,
-          `CSV files processed: ${data.result.files_processed}`,
+          `Target page: ${result.payload.result.target_page}`,
+          `Posts requested: ${result.payload.result.posts_requested}`,
+          `Posts successfully loaded: ${result.payload.result.posts_loaded}`,
+          `Comments collected: ${result.payload.result.comments_collected}`,
+          `Rows loaded into DB: ${result.payload.result.rows_loaded_to_db}`,
+          `CSV files processed: ${result.payload.result.files_processed}`,
         ].join('\n');
       } else {
-        const errorData = await response.json();
-        document.getElementById('response-p').textContent = `Error: ${errorData.error}`;
+        document.getElementById('response-p').textContent = `Error: ${(result.payload && result.payload.error) || 'Process-data request failed.'}`;
       }
     } catch (error) {
       document.getElementById('response-p').textContent = `Error: ${error.message}`;
+    } finally {
+      setExtractionInProgress(false);
     }
   }
 

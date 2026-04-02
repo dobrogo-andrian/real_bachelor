@@ -7,8 +7,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+from functools import lru_cache
 from dataclasses import dataclass
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Mapping, Optional, cast
 
 import pandas as pd
 from datasets import Dataset, DatasetDict, concatenate_datasets, get_dataset_split_names, load_dataset
@@ -117,13 +118,15 @@ def bitsandbytes_available() -> bool:
 
 
 def pick_first_existing_column(columns: Iterable[str], candidates: Iterable[str], dataset_name: str) -> str:
-    available = set(columns)
+    normalized = {column.lower(): column for column in columns}
     for candidate in candidates:
-        if candidate in available:
-            return candidate
+        resolved = normalized.get(candidate.lower())
+        if resolved:
+            return resolved
     raise ValueError(f"[{dataset_name}] Could not find any of the expected columns: {list(candidates)}")
 
 
+@lru_cache(maxsize=32)
 def pick_preferred_split(dataset_name: str, requested_split: Optional[str] = None) -> str:
     split_names = get_dataset_split_names(dataset_name)
     if requested_split:
@@ -141,12 +144,32 @@ def pick_preferred_split(dataset_name: str, requested_split: Optional[str] = Non
     return split_names[0]
 
 
+def load_dataset_split(dataset_name: str, split: str) -> Dataset:
+    dataset = load_dataset(dataset_name, split=split)
+    return cast(Dataset, dataset)
+
+
+def non_empty_labeled_row(row: Mapping[str, object]) -> bool:
+    return bool(row["text"]) and row["label"] is not None
+
+
+def cast_label_row(row: Mapping[str, object]) -> dict[str, int]:
+    return {"label": int(row["label"])}
+
+
+def normalize_ukr_emotions_example(row: Mapping[str, object], text_key: str) -> dict[str, str | int | None]:
+    return {
+        "text": str(row[text_key]).strip() if row.get(text_key) is not None else "",
+        "label": map_ukr_emotions_row(row),
+    }
+
+
 def normalize_example(
-    example: dict,
+    example: Mapping[str, object],
     text_key: str,
     label_key: str,
     map_label_fn: Callable[[object], Optional[int]],
-) -> dict:
+) -> dict[str, str | int | None]:
     text = str(example[text_key]).strip() if example.get(text_key) is not None else ""
     mapped_label = map_label_fn(example.get(label_key))
     return {
@@ -156,8 +179,8 @@ def normalize_example(
 
 
 def finalize_unified_dataset(dataset: Dataset, dataset_name: str) -> Dataset:
-    dataset = dataset.filter(lambda row: bool(row["text"]) and row["label"] is not None)
-    dataset = dataset.map(lambda row: {"label": int(row["label"])}, desc=f"Casting labels for {dataset_name}")
+    dataset = dataset.filter(non_empty_labeled_row)
+    dataset = dataset.map(cast_label_row, desc=f"Casting labels for {dataset_name}")
     print(f"[{dataset_name}] usable rows after normalization: {len(dataset):,}")
     return dataset
 
@@ -240,7 +263,7 @@ def load_and_standardize_hf_dataset(
     map_label_fn: Callable[[object], Optional[int]],
 ) -> Dataset:
     chosen_split = pick_preferred_split(dataset_name, split)
-    raw_dataset = load_dataset(dataset_name, split=chosen_split)
+    raw_dataset = load_dataset_split(dataset_name, chosen_split)
 
     text_key = pick_first_existing_column(raw_dataset.column_names, text_candidates, dataset_name)
     label_key = pick_first_existing_column(raw_dataset.column_names, label_candidates, dataset_name)
@@ -268,16 +291,13 @@ def load_rusentiment(_: PipelineConfig) -> Dataset:
 def load_ukr_emotions(_: PipelineConfig) -> Dataset:
     dataset_name = "ukr-detect/ukr-emotions-binary"
     chosen_split = pick_preferred_split(dataset_name, None)
-    raw_dataset = load_dataset(dataset_name, split=chosen_split)
+    raw_dataset = load_dataset_split(dataset_name, chosen_split)
     text_key = pick_first_existing_column(raw_dataset.column_names, ("text", "sentence", "comment"), dataset_name)
 
     print(f"[{dataset_name}] split='{chosen_split}', text='{text_key}', raw rows={len(raw_dataset):,}")
 
     normalized = raw_dataset.map(
-        lambda row: {
-            "text": str(row[text_key]).strip() if row.get(text_key) is not None else "",
-            "label": map_ukr_emotions_row(row),
-        },
+        lambda row: normalize_ukr_emotions_example(row, text_key),
         remove_columns=raw_dataset.column_names,
         desc=f"Normalizing {dataset_name}",
     )
@@ -314,7 +334,7 @@ def load_slang_dataset(config: PipelineConfig) -> Dataset:
     else:
         dataset_name = source
         chosen_split = pick_preferred_split(source, config.slang_split)
-        dataset = load_dataset(source, split=chosen_split)
+        dataset = load_dataset_split(source, chosen_split)
         text_key = pick_first_existing_column(dataset.column_names, (config.slang_text_column, "text", "comment"), dataset_name)
         label_key = pick_first_existing_column(dataset.column_names, (config.slang_label_column, "label", "sentiment"), dataset_name)
         print(f"[{dataset_name}] split='{chosen_split}', text='{text_key}', label='{label_key}', raw rows={len(dataset):,}")

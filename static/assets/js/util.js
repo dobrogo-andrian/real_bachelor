@@ -1,13 +1,4 @@
 (function($) {
-const authToken = localStorage.getItem('authToken');
-
-$.ajaxSetup({
-    beforeSend: function(xhr) {
-        if (authToken) {
-            xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
-        }
-    }
-});
 	/**
 	 * Generate an indented list of links from a nav. Meant for use with panel().
 	 * @return {jQuery} jQuery object.

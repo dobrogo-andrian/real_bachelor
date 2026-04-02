@@ -96,6 +96,26 @@ class LoadToDbTests(unittest.TestCase):
         self.assertEqual(rows[0]["PostTime"], post_time)
         self.assertEqual(rows[0]["LoadTime"], load_time)
 
+    def test_prepare_rows_from_comment_records(self):
+        load_time = datetime(2024, 1, 1, 12, 0, 0)
+
+        rows = load_module.prepare_rows_from_comment_records(
+            [("First", "2024-01-01T09:10:11", 5), ("Second", "", "")],
+            page_id="arthaslav",
+            post_href="https://instagram.com/p/1",
+            page_name="Artha Slav",
+            load_time=load_time,
+        )
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["PageName"], "Artha Slav")
+        self.assertEqual(rows[0]["PageID"], "arthaslav")
+        self.assertEqual(rows[0]["CommentLikes"], 5)
+        self.assertEqual(rows[1]["CommentLikes"], 0)
+        self.assertEqual(rows[0]["PostTime"], datetime(2024, 1, 1, 9, 10, 11))
+        self.assertEqual(rows[1]["PostTime"], datetime(2024, 1, 1, 9, 10, 11))
+        self.assertEqual(rows[0]["LoadTime"], load_time)
+
     def test_insert_rows(self):
         fake_connection = FakeConnection()
         rows = [
@@ -118,9 +138,41 @@ class LoadToDbTests(unittest.TestCase):
         self.assertEqual(inserted_count, 1)
         self.assertEqual(empty_inserted_count, 0)
         self.assertTrue(fake_connection.cursor_instance.fast_executemany)
-        self.assertIn("MERGE [dbo].[Comments]", fake_connection.cursor_instance.executemany_sql)
+        self.assertIn("INSERT INTO #CommentsStage", fake_connection.cursor_instance.executemany_sql)
         self.assertEqual(fake_connection.cursor_instance.executemany_params[0][0], "hash-1")
+        self.assertTrue(
+            any("MERGE [dbo].[Comments]" in sql for sql, _params in fake_connection.cursor_instance.executed)
+        )
         self.assertTrue(fake_connection.commit_called)
+
+    def test_insert_rows_reuses_connection_safely(self):
+        fake_connection = FakeConnection()
+        rows = [
+            {
+                "CommentHash": "hash-1",
+                "PageName": "Page",
+                "PageID": "page-id",
+                "PostHref": "href",
+                "PostTime": datetime(2024, 1, 1, 10, 0, 0),
+                "Comment": "Hello",
+                "CommentTime": datetime(2024, 1, 1, 10, 5, 0),
+                "CommentLikes": 4,
+                "LoadTime": datetime(2024, 1, 1, 11, 0, 0),
+            }
+        ]
+
+        load_module.insert_rows(fake_connection, rows)
+        load_module.insert_rows(fake_connection, rows)
+
+        create_sql_calls = [
+            sql for sql, _params in fake_connection.cursor_instance.executed if "CREATE TABLE #CommentsStage" in sql
+        ]
+        drop_sql_calls = [
+            sql for sql, _params in fake_connection.cursor_instance.executed if "DROP TABLE #CommentsStage" in sql
+        ]
+
+        self.assertEqual(len(create_sql_calls), 2)
+        self.assertEqual(len(drop_sql_calls), 4)
 
     def test_iter_csv_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -135,6 +187,41 @@ class LoadToDbTests(unittest.TestCase):
             )
 
         self.assertEqual(found_files, ["a.csv", "nested/b.CSV"])
+
+    def test_iter_row_chunks(self):
+        chunks = list(load_module.iter_row_chunks([1, 2, 3, 4, 5], chunk_size=2))
+        self.assertEqual(chunks, [[1, 2], [3, 4], [5]])
+
+        with self.assertRaisesRegex(ValueError, "chunk_size must be greater than zero"):
+            list(load_module.iter_row_chunks([1], chunk_size=0))
+
+    def test_load_row_batches(self):
+        fake_connection = FakeConnection()
+        row_batches = [
+            [{"CommentHash": "hash-1"}, {"CommentHash": "hash-2"}, {"CommentHash": "hash-3"}],
+            [],
+            [{"CommentHash": "hash-4"}],
+        ]
+        inserted_batches = []
+
+        def fake_insert_rows(conn, rows):
+            inserted_batches.append((conn, rows))
+            return len(rows)
+
+        with patch.object(load_module, "insert_rows", side_effect=fake_insert_rows):
+            result = load_module.load_row_batches(
+                row_batches,
+                dry_run=False,
+                conn=fake_connection,
+                chunk_size=2,
+            )
+
+        self.assertEqual(result["rows_loaded"], 4)
+        self.assertEqual(result["files_processed"], 2)
+        self.assertEqual(result["chunks_processed"], 3)
+        self.assertEqual([len(rows) for _conn, rows in inserted_batches], [2, 1, 1])
+        self.assertTrue(all(conn is fake_connection for conn, _rows in inserted_batches))
+        self.assertFalse(fake_connection.close_called)
 
     def test_load_to_db(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -161,6 +248,8 @@ class LoadToDbTests(unittest.TestCase):
                         "rows_loaded": 2,
                         "input_files_found": 2,
                         "dry_run": True,
+                        "batches_processed": 2,
+                        "chunks_processed": 2,
                     },
                 )
 
@@ -177,6 +266,8 @@ class LoadToDbTests(unittest.TestCase):
                         "rows_loaded": 2,
                         "input_files_found": 2,
                         "dry_run": False,
+                        "batches_processed": 2,
+                        "chunks_processed": 2,
                     },
                 )
                 self.assertEqual(len(inserted_batches), 2)

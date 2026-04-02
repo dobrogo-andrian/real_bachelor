@@ -1,9 +1,8 @@
 import os
-import shutil
-import time
-import random
 import json
-import pandas as pd
+import random
+import time
+from datetime import datetime, timezone
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -12,7 +11,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
-from static.backend.common_utils import get_next_filename
+from static.backend.load_to_db import prepare_rows_from_comment_records
 from static.backend.db_connection import (
     clear_user_instagram_cookies,
     fetch_user_instagram_credentials,
@@ -106,30 +105,6 @@ def retry_on_stale(action, description, retries=2, wait_range=(1.2, 2.4)):
             print(f"[WARN] Stale element during {description}. Retrying ({attempt + 1}/{retries})...")
             human_pause(*wait_range)
     return None
-
-
-def delete_previos_files():
-    relative_directory = 'unprocessed_data'
-
-    if not os.path.exists(relative_directory):
-        os.makedirs(relative_directory, exist_ok=True)
-        return
-
-    for filename in os.listdir(relative_directory):
-        file_path = os.path.join(relative_directory, filename)
-
-        if os.path.isfile(file_path):
-            try:
-                os.remove(file_path)
-                print(f"Deleted file: {file_path}")
-            except Exception as e:
-                print(f"Error deleting file {file_path}: {e}")
-        elif os.path.isdir(file_path):
-            try:
-                shutil.rmtree(file_path)
-                print(f"Deleted directory: {file_path}")
-            except Exception as e:
-                print(f"Error deleting directory {file_path}: {e}")
 
 
 def setup_driver(headless=False):
@@ -767,7 +742,7 @@ def click_more_button(driver):
         return False
 
 
-def save_comments(driver, POST_URL, target_page, page_name):
+def collect_post_comment_rows(driver, POST_URL, target_page, page_name):
     print("[INFO] Opening post...")
     driver.get(POST_URL)
     wait_for_post_content(driver, timeout=12)
@@ -779,18 +754,16 @@ def save_comments(driver, POST_URL, target_page, page_name):
     print("[INFO] Collecting comments...")
     comments_data = collect_comments_and_likes(driver)
     print(comments_data)
-    print(f"[INFO] Collected {len(comments_data)} comments. Saving CSV...")
-    df = pd.DataFrame(comments_data, columns=["Comment", "Time", "Likes"])
-    df.insert(0, "PostHref", POST_URL)
-    df.insert(0, "PageID", target_page)
-    df.insert(0, "PageName", page_name)
-    print(f"df: {df}")
-    output_path = get_next_filename(target_page, "unprocessed_data/comments1")
-    df.to_csv(output_path, index=False, encoding="utf-8-sig")
-
-    print(f"[INFO] Saved CSV: {output_path}")
+    print(f"[INFO] Collected {len(comments_data)} comments. Preparing in-memory rows...")
+    rows = prepare_rows_from_comment_records(
+        comments_data,
+        page_id=target_page,
+        post_href=POST_URL,
+        page_name=page_name,
+        load_time=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
     return {
-        "output_path": output_path,
+        "rows": rows,
         "comments_collected": len(comments_data),
         "post_url": POST_URL,
     }
@@ -933,14 +906,15 @@ def extract_data(
     existing_post_hrefs=None,
     app_username=None,
     headless_session_only=False,
+    comment_batch_handler=None,
 ):
-    delete_previos_files()
     log = ""
     posts_requested = int(number_of_posts)
     new_posts_found = 0
     posts_loaded = 0
     collected_comment_rows = 0
-    saved_files = []
+    rows_loaded_to_db = 0
+    batches_loaded_to_db = 0
     existing_post_hrefs = set(existing_post_hrefs or [])
     driver = setup_driver(headless=headless_session_only)
     human_pause(0.4, 0.9)
@@ -964,7 +938,6 @@ def extract_data(
                 "new_posts_found": 0,
                 "posts_loaded": 0,
                 "comments_collected": 0,
-                "saved_files": [],
                 "aborted_reason": restriction_reason,
             }
         print("[INFO] Loading cookies...\n")
@@ -987,7 +960,6 @@ def extract_data(
                     "new_posts_found": 0,
                     "posts_loaded": 0,
                     "comments_collected": 0,
-                    "saved_files": [],
                     "aborted_reason": restriction_reason,
                 }
             print("[INFO] Cookies loaded successfully.\n")
@@ -1005,7 +977,6 @@ def extract_data(
                     "new_posts_found": 0,
                     "posts_loaded": 0,
                     "comments_collected": 0,
-                    "saved_files": [],
                     "aborted_reason": reason,
                 }
         print("[INFO] Starting data collection...\n")
@@ -1023,10 +994,12 @@ def extract_data(
             new_posts_found = len(posts)
             for i in posts:
                 try:
-                    result = save_comments(driver, i, target_page, page_name)
+                    result = collect_post_comment_rows(driver, i, target_page, page_name)
+                    if comment_batch_handler and result["rows"]:
+                        rows_loaded_to_db += int(comment_batch_handler(result["rows"]))
+                        batches_loaded_to_db += 1
                     posts_loaded += 1
                     collected_comment_rows += result["comments_collected"]
-                    saved_files.append(result["output_path"])
                 except Exception as e:
                     print(f"[WARN] Skipping post after retries failed: {i}. Reason: {e}")
                     log += f"[WARN] Skipping post after retries failed: {i}. Reason: {e}\n"
@@ -1049,10 +1022,12 @@ def extract_data(
                 new_posts_found = len(posts)
                 for i in posts:
                     try:
-                        result = save_comments(driver, i, target_page, page_name)
+                        result = collect_post_comment_rows(driver, i, target_page, page_name)
+                        if comment_batch_handler and result["rows"]:
+                            rows_loaded_to_db += int(comment_batch_handler(result["rows"]))
+                            batches_loaded_to_db += 1
                         posts_loaded += 1
                         collected_comment_rows += result["comments_collected"]
-                        saved_files.append(result["output_path"])
                     except Exception as e:
                         print(f"[WARN] Skipping post after retries failed: {i}. Reason: {e}")
                         log += f"[WARN] Skipping post after retries failed: {i}. Reason: {e}\n"
@@ -1067,7 +1042,6 @@ def extract_data(
                     "new_posts_found": 0,
                     "posts_loaded": 0,
                     "comments_collected": 0,
-                    "saved_files": [],
                     "aborted_reason": failure_reason,
                 }
         print("[INFO] Data collection finished.\n")
@@ -1086,7 +1060,8 @@ def extract_data(
         "new_posts_found": new_posts_found,
         "posts_loaded": posts_loaded,
         "comments_collected": collected_comment_rows,
-        "saved_files": saved_files,
+        "rows_loaded_to_db": rows_loaded_to_db,
+        "batches_loaded_to_db": batches_loaded_to_db,
     }
 
 

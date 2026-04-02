@@ -24,6 +24,8 @@ DEFAULT_SENTIMENT = "neutral"
 BASE_MODEL_NAME = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
 BASE_MODEL_REVISION = "refs/pr/15"
 ADAPTER_DIR = Path(__file__).resolve().parents[2] / "model_fine_tuning" / "sentiment_lora_adapters"
+INFERENCE_BATCH_SIZE = int(os.getenv("INFERENCE_BATCH_SIZE", "32"))
+DB_FETCH_BATCH_SIZE = int(os.getenv("ENRICH_DB_FETCH_BATCH_SIZE", "512"))
 LINGUA_LANGUAGE_MAP = {
     Language.UKRAINIAN: "uk",
     Language.RUSSIAN: "ru",
@@ -41,6 +43,15 @@ warnings.filterwarnings(
     message="`clean_up_tokenization_spaces` was not set.*",
     category=FutureWarning,
 )
+
+LABEL_MAP = {
+    "label_0": "negative",
+    "label_1": "neutral",
+    "label_2": "positive",
+    "negative": "negative",
+    "neutral": "neutral",
+    "positive": "positive",
+}
 
 
 def normalize_unicode(text):
@@ -128,20 +139,25 @@ def load_models():
     )
 
 
-def analyze_sentiment(comment, classifier):
-    try:
-        result = classifier(comment)
-        label = str(result[0]["label"]).lower()
-        if label in {"label_0", "negative"}:
-            return "negative"
-        if label in {"label_1", "neutral"}:
-            return "neutral"
-        if label in {"label_2", "positive"}:
-            return "positive"
-    except Exception:
-        return DEFAULT_SENTIMENT
+def analyze_sentiment_batch(comments, classifier, batch_size=INFERENCE_BATCH_SIZE):
+    if not comments:
+        return []
 
-    return DEFAULT_SENTIMENT
+    try:
+        results = classifier(
+            comments,
+            batch_size=batch_size,
+            truncation=True,
+            max_length=128,
+        )
+    except Exception:
+        return [DEFAULT_SENTIMENT] * len(comments)
+
+    sentiments = []
+    for result in results:
+        label = str(result.get("label", "")).lower()
+        sentiments.append(LABEL_MAP.get(label, DEFAULT_SENTIMENT))
+    return sentiments
 
 
 def build_comment_query(mode, page_name=None, page_id=None):
@@ -153,7 +169,17 @@ def build_comment_query(mode, page_name=None, page_id=None):
                         c.[PostTime],
                         c.[Comment],
                         c.[CommentTime],
-                        c.[CommentLikes]
+                        c.[CommentLikes],
+                        ROW_NUMBER() OVER (
+                            PARTITION BY
+                                ISNULL(c.[PageID], N''),
+                                ISNULL(c.[PostHref], N''),
+                                c.[PostTime]
+                            ORDER BY
+                                CASE WHEN c.[CommentTime] IS NULL THEN 1 ELSE 0 END,
+                                c.[CommentTime],
+                                c.[CommentHash]
+                        ) AS [CommentOrder]
                  FROM [dbo].[Comments] AS c \
                  """
 
@@ -230,41 +256,20 @@ def assign_comment_order(comment_rows):
     return comment_order_by_hash
 
 
-def enrich_comment(comment, models):
-    normalized_comment = normalize_comment_payload(comment)
-    normalized_analysis_comment = normalize_comment_for_analysis(normalized_comment)
-    main_language = detect_main_language(normalized_comment)
-
-    if main_language not in SUPPORTED_LANGUAGES:
-        main_language = "other"
-
-    if normalized_analysis_comment:
-        sentiment = analyze_sentiment(normalized_analysis_comment, models)
-    else:
-        sentiment = DEFAULT_SENTIMENT
-
-    if sentiment not in {"positive", "neutral", "negative"}:
-        sentiment = DEFAULT_SENTIMENT
-
-    return {
-        "MainLanguage": main_language,
-        "NormalizedComment": normalized_analysis_comment,
-        "Sentiment": sentiment,
-    }
-
-
-def fetch_comment_rows(conn, mode, page_name=None, page_id=None):
+def iter_comment_row_batches(conn, mode, page_name=None, page_id=None, fetch_size=DB_FETCH_BATCH_SIZE):
     query, params = build_comment_query(mode, page_name=page_name, page_id=page_id)
     cursor = conn.cursor()
     cursor.execute(query, params)
     columns = [column[0] for column in cursor.description]
 
-    rows = []
-    for raw_row in cursor.fetchall():
-        rows.append(dict(zip(columns, raw_row)))
-
-    cursor.close()
-    return rows
+    try:
+        while True:
+            raw_rows = cursor.fetchmany(fetch_size)
+            if not raw_rows:
+                break
+            yield [dict(zip(columns, raw_row)) for raw_row in raw_rows]
+    finally:
+        cursor.close()
 
 
 def clear_enriched_scope(conn, mode, page_name=None, page_id=None):
@@ -295,11 +300,21 @@ def clear_enriched_scope(conn, mode, page_name=None, page_id=None):
 def prepare_enriched_rows(comment_rows, models, source):
     processed_time = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
     enriched_rows = []
-    comment_order_by_hash = assign_comment_order(comment_rows)
+    comment_order_by_hash = None
+    if any(row.get("CommentOrder") is None for row in comment_rows):
+        comment_order_by_hash = assign_comment_order(comment_rows)
+    normalized_comments = []
 
     for row in comment_rows:
-        enriched = enrich_comment(row["Comment"], models)
-        comment_order = comment_order_by_hash.get(row["CommentHash"])
+        comment_order = row.get("CommentOrder")
+        if comment_order is None and comment_order_by_hash is not None:
+            comment_order = comment_order_by_hash.get(row["CommentHash"])
+        normalized_comment = normalize_comment_payload(row["Comment"])
+        normalized_analysis_comment = normalize_comment_for_analysis(normalized_comment)
+        main_language = detect_main_language(normalized_comment)
+        if main_language not in SUPPORTED_LANGUAGES:
+            main_language = "other"
+        normalized_comments.append(normalized_analysis_comment)
         enriched_rows.append({
             "CommentHash": row["CommentHash"],
             "PageName": row["PageName"],
@@ -309,12 +324,20 @@ def prepare_enriched_rows(comment_rows, models, source):
             "CommentTime": normalize_datetime_value(row["CommentTime"]),
             "CommentOrder": comment_order,
             "CommentLikes": 0 if comment_order == 1 else row["CommentLikes"],
-            "MainLanguage": enriched["MainLanguage"],
-            "NormalizedComment": enriched["NormalizedComment"],
-            "Sentiment": enriched["Sentiment"],
+            "MainLanguage": main_language,
+            "NormalizedComment": normalized_analysis_comment,
+            "Sentiment": DEFAULT_SENTIMENT,
             "ProcessedTime": processed_time,
             "Source": source,
         })
+
+    non_empty_comments = [comment for comment in normalized_comments if comment]
+    predicted_sentiments = iter(analyze_sentiment_batch(non_empty_comments, models))
+    for row, normalized_comment in zip(enriched_rows, normalized_comments):
+        if normalized_comment:
+            sentiment = next(predicted_sentiments, DEFAULT_SENTIMENT)
+            if sentiment in {"positive", "neutral", "negative"}:
+                row["Sentiment"] = sentiment
 
     return enriched_rows
 
@@ -324,7 +347,6 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
         return {"processed": 0, "added_count": 0, "updated_count": 0}
 
     cursor = conn.cursor()
-    added_count = 0
     cursor.fast_executemany = True
     cursor.setinputsizes([
         (pyodbc.SQL_WVARCHAR, 64, 0),
@@ -341,162 +363,215 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
         (pyodbc.SQL_TYPE_TIMESTAMP, 0, 0),
         (pyodbc.SQL_WVARCHAR, 50, 0),
     ])
-    merge_sql = """
-        MERGE [dbo].[EnrichedComments] AS target
-        USING (
-            SELECT
-                ? AS [CommentHash],
-                ? AS [PageName],
-                ? AS [PageID],
-                ? AS [PostHref],
-                ? AS [PostTime],
-                ? AS [CommentTime],
-                ? AS [CommentOrder],
-                ? AS [CommentLikes],
-                ? AS [MainLanguage],
-                ? AS [NormalizedComment],
-                ? AS [Sentiment],
-                ? AS [ProcessedTime],
-                ? AS [Source]
-        ) AS source
-        ON target.[CommentHash] = source.[CommentHash]
-        WHEN MATCHED AND (
-            ISNULL(target.[PageName], N'') <> ISNULL(source.[PageName], N'')
-            OR ISNULL(target.[PageID], N'') <> ISNULL(source.[PageID], N'')
-            OR ISNULL(target.[PostHref], N'') <> ISNULL(source.[PostHref], N'')
-            OR ISNULL(target.[PostTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[PostTime], CONVERT(datetime2(0), '1900-01-01'))
-            OR ISNULL(target.[CommentTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[CommentTime], CONVERT(datetime2(0), '1900-01-01'))
-            OR ISNULL(target.[CommentOrder], -1) <> ISNULL(source.[CommentOrder], -1)
-            OR ISNULL(target.[CommentLikes], -1) <> ISNULL(source.[CommentLikes], -1)
-            OR ISNULL(target.[MainLanguage], N'') <> ISNULL(source.[MainLanguage], N'')
-            OR ISNULL(target.[NormalizedComment], N'') <> ISNULL(source.[NormalizedComment], N'')
-            OR ISNULL(target.[Sentiment], N'') <> ISNULL(source.[Sentiment], N'')
-            OR ISNULL(target.[Source], N'') <> ISNULL(source.[Source], N'')
-        ) THEN
-            UPDATE SET
-                [PageName] = source.[PageName],
-                [PageID] = source.[PageID],
-                [PostHref] = source.[PostHref],
-                [PostTime] = source.[PostTime],
-                [CommentTime] = source.[CommentTime],
-                [CommentOrder] = source.[CommentOrder],
-                [CommentLikes] = source.[CommentLikes],
-                [MainLanguage] = source.[MainLanguage],
-                [NormalizedComment] = source.[NormalizedComment],
-                [Sentiment] = source.[Sentiment],
-                [ProcessedTime] = source.[ProcessedTime],
-                [Source] = source.[Source]
-        WHEN NOT MATCHED THEN
-            INSERT (
-                [CommentHash], [PageName], [PageID], [PostHref], [PostTime],
-                [CommentTime], [CommentOrder], [CommentLikes], [MainLanguage], [NormalizedComment],
+    deduplicated_rows = list(_deduplicate_rows_by_hash(rows))
+    params = [
+        (
+            row["CommentHash"],
+            row["PageName"],
+            row["PageID"],
+            row["PostHref"],
+            row["PostTime"],
+            row["CommentTime"],
+            row["CommentOrder"],
+            row["CommentLikes"],
+            row["MainLanguage"],
+            row["NormalizedComment"],
+            row["Sentiment"],
+            row["ProcessedTime"],
+            row["Source"],
+        )
+        for row in deduplicated_rows
+    ]
+    try:
+        cursor.execute(
+            """
+            IF OBJECT_ID('tempdb..#EnrichedCommentsStage') IS NOT NULL
+                DROP TABLE #EnrichedCommentsStage;
+
+            CREATE TABLE #EnrichedCommentsStage (
+                [CommentHash] nvarchar(64) NOT NULL PRIMARY KEY,
+                [PageName] nvarchar(100) NULL,
+                [PageID] nvarchar(100) NULL,
+                [PostHref] nvarchar(max) NULL,
+                [PostTime] datetime2(0) NULL,
+                [CommentTime] datetime2(0) NULL,
+                [CommentOrder] int NULL,
+                [CommentLikes] int NULL,
+                [MainLanguage] nvarchar(20) NULL,
+                [NormalizedComment] nvarchar(max) NULL,
+                [Sentiment] nvarchar(20) NULL,
+                [ProcessedTime] datetime2(0) NULL,
+                [Source] nvarchar(50) NULL
+            )
+            """
+        )
+        cursor.executemany(
+            """
+            INSERT INTO #EnrichedCommentsStage (
+                [CommentHash], [PageName], [PageID], [PostHref], [PostTime], [CommentTime],
+                [CommentOrder], [CommentLikes], [MainLanguage], [NormalizedComment],
                 [Sentiment], [ProcessedTime], [Source]
             )
-            VALUES (
-                source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime],
-                source.[CommentTime], source.[CommentOrder], source.[CommentLikes], source.[MainLanguage], source.[NormalizedComment],
-                source.[Sentiment], source.[ProcessedTime], source.[Source]
-            );
-    """
-    insert_if_missing_sql = """
-                            INSERT INTO [dbo].[EnrichedComments] ([CommentHash], [PageName], [PageID], [PostHref],
-                                                                  [PostTime],
-                                                                  [CommentTime], [CommentOrder], [CommentLikes],
-                                                                  [MainLanguage], [NormalizedComment],
-                                                                  [Sentiment], [ProcessedTime], [Source])
-                            SELECT source.[CommentHash],
-                                   source.[PageName],
-                                   source.[PageID],
-                                   source.[PostHref],
-                                   source.[PostTime],
-                                   source.[CommentTime],
-                                   source.[CommentOrder],
-                                   source.[CommentLikes],
-                                   source.[MainLanguage],
-                                   source.[NormalizedComment],
-                                   source.[Sentiment],
-                                   source.[ProcessedTime],
-                                   source.[Source]
-                            FROM (SELECT ? AS [CommentHash],
-                                         ? AS [PageName],
-                                         ? AS [PageID],
-                                         ? AS [PostHref],
-                                         ? AS [PostTime],
-                                         ? AS [CommentTime],
-                                         ? AS [CommentOrder],
-                                         ? AS [CommentLikes],
-                                         ? AS [MainLanguage],
-                                         ? AS [NormalizedComment],
-                                         ? AS [Sentiment],
-                                         ? AS [ProcessedTime],
-                                         ? AS [Source]) AS source
-                            WHERE NOT EXISTS (SELECT 1
-                                              FROM [dbo].[EnrichedComments] AS target
-                                              WHERE target.[CommentHash] = source.[CommentHash]); \
-                            """
-    updated_count = 0
-    for row in rows:
-        cursor.execute(
-            "SELECT COUNT(1) FROM [dbo].[EnrichedComments] WHERE [CommentHash] = ?",
-            row["CommentHash"],
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            params,
         )
-        existed_before = cursor.fetchone()[0] > 0
         cursor.execute(
-            merge_sql if allow_updates else insert_if_missing_sql,
-            (
-                row["CommentHash"],
-                row["PageName"],
-                row["PageID"],
-                row["PostHref"],
-                row["PostTime"],
-                row["CommentTime"],
-                row["CommentOrder"],
-                row["CommentLikes"],
-                row["MainLanguage"],
-                row["NormalizedComment"],
-                row["Sentiment"],
-                row["ProcessedTime"],
-                row["Source"],
-            ),
+            """
+            SELECT
+                SUM(CASE WHEN target.[CommentHash] IS NULL THEN 1 ELSE 0 END) AS AddedCount,
+                SUM(CASE WHEN target.[CommentHash] IS NOT NULL AND (
+                    ISNULL(target.[PageName], N'') <> ISNULL(source.[PageName], N'')
+                    OR ISNULL(target.[PageID], N'') <> ISNULL(source.[PageID], N'')
+                    OR ISNULL(target.[PostHref], N'') <> ISNULL(source.[PostHref], N'')
+                    OR ISNULL(target.[PostTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[PostTime], CONVERT(datetime2(0), '1900-01-01'))
+                    OR ISNULL(target.[CommentTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[CommentTime], CONVERT(datetime2(0), '1900-01-01'))
+                    OR ISNULL(target.[CommentOrder], -1) <> ISNULL(source.[CommentOrder], -1)
+                    OR ISNULL(target.[CommentLikes], -1) <> ISNULL(source.[CommentLikes], -1)
+                    OR ISNULL(target.[MainLanguage], N'') <> ISNULL(source.[MainLanguage], N'')
+                    OR ISNULL(target.[NormalizedComment], N'') <> ISNULL(source.[NormalizedComment], N'')
+                    OR ISNULL(target.[Sentiment], N'') <> ISNULL(source.[Sentiment], N'')
+                    OR ISNULL(target.[Source], N'') <> ISNULL(source.[Source], N'')
+                ) THEN 1 ELSE 0 END) AS UpdatedCount
+            FROM #EnrichedCommentsStage AS source
+            LEFT JOIN [dbo].[EnrichedComments] AS target
+                ON target.[CommentHash] = source.[CommentHash]
+            """
         )
-        if not existed_before and cursor.rowcount > 0:
-            added_count += 1
-        elif existed_before and allow_updates and cursor.rowcount > 0:
-            updated_count += 1
-    conn.commit()
-    cursor.close()
-    return {"processed": len(rows), "added_count": added_count, "updated_count": updated_count}
+        counts_row = cursor.fetchone()
+        added_count = int(counts_row[0] or 0) if counts_row else 0
+        updated_count = int(counts_row[1] or 0) if counts_row and len(counts_row) > 1 else 0
+        if allow_updates:
+            cursor.execute(
+                """
+                MERGE [dbo].[EnrichedComments] AS target
+                USING #EnrichedCommentsStage AS source
+                ON target.[CommentHash] = source.[CommentHash]
+                WHEN MATCHED AND (
+                    ISNULL(target.[PageName], N'') <> ISNULL(source.[PageName], N'')
+                    OR ISNULL(target.[PageID], N'') <> ISNULL(source.[PageID], N'')
+                    OR ISNULL(target.[PostHref], N'') <> ISNULL(source.[PostHref], N'')
+                    OR ISNULL(target.[PostTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[PostTime], CONVERT(datetime2(0), '1900-01-01'))
+                    OR ISNULL(target.[CommentTime], CONVERT(datetime2(0), '1900-01-01')) <> ISNULL(source.[CommentTime], CONVERT(datetime2(0), '1900-01-01'))
+                    OR ISNULL(target.[CommentOrder], -1) <> ISNULL(source.[CommentOrder], -1)
+                    OR ISNULL(target.[CommentLikes], -1) <> ISNULL(source.[CommentLikes], -1)
+                    OR ISNULL(target.[MainLanguage], N'') <> ISNULL(source.[MainLanguage], N'')
+                    OR ISNULL(target.[NormalizedComment], N'') <> ISNULL(source.[NormalizedComment], N'')
+                    OR ISNULL(target.[Sentiment], N'') <> ISNULL(source.[Sentiment], N'')
+                    OR ISNULL(target.[Source], N'') <> ISNULL(source.[Source], N'')
+                ) THEN
+                    UPDATE SET
+                        [PageName] = source.[PageName],
+                        [PageID] = source.[PageID],
+                        [PostHref] = source.[PostHref],
+                        [PostTime] = source.[PostTime],
+                        [CommentTime] = source.[CommentTime],
+                        [CommentOrder] = source.[CommentOrder],
+                        [CommentLikes] = source.[CommentLikes],
+                        [MainLanguage] = source.[MainLanguage],
+                        [NormalizedComment] = source.[NormalizedComment],
+                        [Sentiment] = source.[Sentiment],
+                        [ProcessedTime] = source.[ProcessedTime],
+                        [Source] = source.[Source]
+                WHEN NOT MATCHED THEN
+                    INSERT (
+                        [CommentHash], [PageName], [PageID], [PostHref], [PostTime],
+                        [CommentTime], [CommentOrder], [CommentLikes], [MainLanguage], [NormalizedComment],
+                        [Sentiment], [ProcessedTime], [Source]
+                    )
+                    VALUES (
+                        source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime],
+                        source.[CommentTime], source.[CommentOrder], source.[CommentLikes], source.[MainLanguage], source.[NormalizedComment],
+                        source.[Sentiment], source.[ProcessedTime], source.[Source]
+                    );
+                """
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO [dbo].[EnrichedComments] (
+                    [CommentHash], [PageName], [PageID], [PostHref], [PostTime],
+                    [CommentTime], [CommentOrder], [CommentLikes], [MainLanguage], [NormalizedComment],
+                    [Sentiment], [ProcessedTime], [Source]
+                )
+                SELECT
+                    source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime],
+                    source.[CommentTime], source.[CommentOrder], source.[CommentLikes], source.[MainLanguage], source.[NormalizedComment],
+                    source.[Sentiment], source.[ProcessedTime], source.[Source]
+                FROM #EnrichedCommentsStage AS source
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM [dbo].[EnrichedComments] AS target
+                    WHERE target.[CommentHash] = source.[CommentHash]
+                )
+                """
+            )
+            updated_count = 0
+        conn.commit()
+        return {"processed": len(rows), "added_count": added_count, "updated_count": updated_count}
+    finally:
+        try:
+            cursor.execute(
+                """
+                IF OBJECT_ID('tempdb..#EnrichedCommentsStage') IS NOT NULL
+                    DROP TABLE #EnrichedCommentsStage;
+                """
+            )
+        except Exception:
+            pass
+        cursor.close()
 
 
 def enrich_comments(mode="whole_db", page_name=None, page_id=None):
     if mode not in {"page_name", "page_id", "whole_db", "delta"}:
         raise ValueError("Unsupported mode. Use one of: page_name, page_id, whole_db, delta.")
 
-    conn = db_connection.get_db_connection()
+    read_conn = db_connection.get_db_connection()
+    write_conn = db_connection.get_db_connection()
     try:
         deleted_count = 0
         if mode in {"page_name", "page_id", "whole_db"}:
-            deleted_count = clear_enriched_scope(conn, mode, page_name=page_name, page_id=page_id)
+            deleted_count = clear_enriched_scope(write_conn, mode, page_name=page_name, page_id=page_id)
 
-        comment_rows = fetch_comment_rows(conn, mode, page_name=page_name, page_id=page_id)
-        if not comment_rows:
+        models = None
+        total_selected = 0
+        total_processed = 0
+        total_added = 0
+        total_updated = 0
+
+        for comment_rows in iter_comment_row_batches(read_conn, mode, page_name=page_name, page_id=page_id):
+            if models is None:
+                models = load_models()
+            total_selected += len(comment_rows)
+            enriched_rows = prepare_enriched_rows(comment_rows, models, source=mode)
+            upsert_stats = upsert_enriched_rows(write_conn, enriched_rows, allow_updates=(mode != "delta"))
+            total_processed += upsert_stats["processed"]
+            total_added += upsert_stats["added_count"]
+            total_updated += upsert_stats["updated_count"]
+
+        if total_selected == 0:
             return {"selected": 0, "processed": 0, "deleted": deleted_count, "mode": mode}
 
-        models = load_models()
-        enriched_rows = prepare_enriched_rows(comment_rows, models, source=mode)
-        upsert_stats = upsert_enriched_rows(conn, enriched_rows, allow_updates=(mode != "delta"))
         return {
-            "selected": len(comment_rows),
-            "processed": upsert_stats["processed"],
-            "added_count": upsert_stats["added_count"],
-            "updated_count": upsert_stats["updated_count"],
+            "selected": total_selected,
+            "processed": total_processed,
+            "added_count": total_added,
+            "updated_count": total_updated,
             "deleted": deleted_count,
             "mode": mode,
             "page_name": page_name,
             "page_id": page_id,
         }
     finally:
-        conn.close()
+        read_conn.close()
+        write_conn.close()
+
+
+def _deduplicate_rows_by_hash(rows):
+    latest_by_hash = {}
+    for row in rows:
+        latest_by_hash[row["CommentHash"]] = row
+    return latest_by_hash.values()
 
 
 def parse_args():

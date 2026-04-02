@@ -19,8 +19,8 @@ class EnrichCommentsTests(unittest.TestCase):
 
     def test_normalize_comment_for_analysis(self):
         self.assertEqual(
-            "Hello 😡 world",
-            enrich_module.normalize_comment_for_analysis("Hello  😡   world"),
+            "Hello рџЎ world",
+            enrich_module.normalize_comment_for_analysis("Hello  рџЎ   world"),
         )
 
     def test_detect_main_language(self):
@@ -48,29 +48,50 @@ class EnrichCommentsTests(unittest.TestCase):
             created_calls.append(kwargs)
             return "classifier"
 
-        with patch.object(enrich_module, "pipeline", side_effect=fake_pipeline):
+        class FakeMergedModel:
+            def eval(self):
+                return None
+
+        class FakePeftModel:
+            def merge_and_unload(self):
+                return FakeMergedModel()
+
+        with patch.object(enrich_module, "pipeline", side_effect=fake_pipeline), patch.object(
+            enrich_module.AutoTokenizer, "from_pretrained", return_value="tokenizer"
+        ), patch.object(
+            enrich_module.AutoModelForSequenceClassification, "from_pretrained", return_value="base-model"
+        ), patch.object(
+            enrich_module.PeftModel, "from_pretrained", return_value=FakePeftModel()
+        ):
             first = enrich_module.load_models()
             second = enrich_module.load_models()
 
         self.assertIs(first, second)
         self.assertEqual(len(created_calls), 1)
         self.assertEqual(first, "classifier")
-        self.assertEqual(created_calls[0]["model"], "cardiffnlp/twitter-xlm-roberta-base-sentiment")
-        self.assertEqual(created_calls[0]["tokenizer"], "cardiffnlp/twitter-xlm-roberta-base-sentiment")
+        self.assertIsInstance(created_calls[0]["model"], FakeMergedModel)
+        self.assertEqual(created_calls[0]["tokenizer"], "tokenizer")
         self.assertTrue(created_calls[0]["truncation"])
-        self.assertEqual(created_calls[0]["max_length"], 512)
+        self.assertEqual(created_calls[0]["max_length"], 128)
 
-    def test_analyze_sentiment(self):
-        positive_classifier = lambda text: [{"label": "LABEL_2"}]
-        neutral_classifier = lambda text: [{"label": "neutral"}]
-
-        self.assertEqual(enrich_module.analyze_sentiment("good", positive_classifier), "positive")
-        self.assertEqual(enrich_module.analyze_sentiment("ok", neutral_classifier), "neutral")
-        self.assertEqual(enrich_module.analyze_sentiment("bad", lambda text: (_ for _ in ()).throw(RuntimeError("fail"))), "neutral")
+    def test_analyze_sentiment_batch(self):
+        classifier = lambda texts, **kwargs: [{"label": "LABEL_2"} for _ in texts]
+        self.assertEqual(
+            enrich_module.analyze_sentiment_batch(["good", "great"], classifier),
+            ["positive", "positive"],
+        )
+        self.assertEqual(
+            enrich_module.analyze_sentiment_batch(
+                ["bad"],
+                lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("fail")),
+            ),
+            ["neutral"],
+        )
 
     def test_build_comment_query(self):
         query, params = enrich_module.build_comment_query("delta")
         self.assertIn("LEFT JOIN [dbo].[EnrichedComments]", query)
+        self.assertIn("ROW_NUMBER() OVER", query)
         self.assertEqual(params, [])
 
         query, params = enrich_module.build_comment_query("page_name", page_name="Artha")
@@ -124,36 +145,16 @@ class EnrichCommentsTests(unittest.TestCase):
 
         self.assertEqual(enrich_module.assign_comment_order(rows), {"a": 1, "b": 2})
 
-    def test_enrich_comment(self):
-        with patch.object(enrich_module, "detect_main_language", return_value="en"), patch.object(
-            enrich_module, "normalize_comment_for_analysis", return_value="Hello 🔥"
-        ), patch.object(enrich_module, "analyze_sentiment", return_value="positive"):
-            enriched = enrich_module.enrich_comment("Hello world", {"en": object()})
-
-        with patch.object(enrich_module, "detect_main_language", return_value="fr"), patch.object(
-            enrich_module, "normalize_comment_for_analysis", return_value="Bonjour"
-        ), patch.object(enrich_module, "analyze_sentiment", return_value="weird"):
-            fallback = enrich_module.enrich_comment("Bonjour", {})
-
-        self.assertEqual(
-            enriched,
-            {"MainLanguage": "en", "NormalizedComment": "Hello 🔥", "Sentiment": "positive"},
-        )
-        self.assertEqual(
-            fallback,
-            {"MainLanguage": "other", "NormalizedComment": "Bonjour", "Sentiment": "neutral"},
-        )
-
-    def test_fetch_comment_rows(self):
+    def test_iter_comment_row_batches(self):
         cursor = FakeCursor(
-            fetchall_values=[("hash-1", "Page", "page-id")],
+            fetchall_values=[[("hash-1", "Page", "page-id")], []],
             description=[("CommentHash",), ("PageName",), ("PageID",)],
         )
         conn = FakeConnection(cursor)
 
-        rows = enrich_module.fetch_comment_rows(conn, "page_id", page_id="page-id")
+        rows = list(enrich_module.iter_comment_row_batches(conn, "page_id", page_id="page-id"))
 
-        self.assertEqual(rows, [{"CommentHash": "hash-1", "PageName": "Page", "PageID": "page-id"}])
+        self.assertEqual(rows, [[{"CommentHash": "hash-1", "PageName": "Page", "PageID": "page-id"}]])
         self.assertTrue(cursor.closed)
 
     def test_clear_enriched_scope(self):
@@ -177,11 +178,20 @@ class EnrichCommentsTests(unittest.TestCase):
             return_value={"hash-1": 1, "hash-2": 2},
         ), patch.object(
             enrich_module,
-            "enrich_comment",
-            side_effect=[
-                {"MainLanguage": "en", "NormalizedComment": "Hello", "Sentiment": "positive"},
-                {"MainLanguage": "en", "NormalizedComment": "World", "Sentiment": "neutral"},
-            ],
+            "normalize_comment_payload",
+            side_effect=["Hello", "World"],
+        ), patch.object(
+            enrich_module,
+            "normalize_comment_for_analysis",
+            side_effect=["Hello", "World"],
+        ), patch.object(
+            enrich_module,
+            "detect_main_language",
+            return_value="en",
+        ), patch.object(
+            enrich_module,
+            "analyze_sentiment_batch",
+            return_value=["positive", "neutral"],
         ):
             rows = enrich_module.prepare_enriched_rows(comment_rows, {"en": object()}, source="whole_db")
 
@@ -210,7 +220,7 @@ class EnrichCommentsTests(unittest.TestCase):
             "Source": "delta",
         }
 
-        cursor = FakeCursor(fetchone_values=[(0,), (1,)], rowcount=1)
+        cursor = FakeCursor(fetchone_values=[(1, 1)], rowcount=1)
         conn = FakeConnection(cursor)
 
         stats = enrich_module.upsert_enriched_rows(conn, [row, row], allow_updates=True)
@@ -222,6 +232,44 @@ class EnrichCommentsTests(unittest.TestCase):
         self.assertTrue(conn.commit_called)
         self.assertTrue(cursor.closed)
 
+    def test_upsert_enriched_rows_reuses_connection_safely(self):
+        row = {
+            "CommentHash": "hash-1",
+            "PageName": "Page",
+            "PageID": "page-id",
+            "PostHref": "href",
+            "PostTime": datetime(2024, 1, 1, 10, 0, 0),
+            "Comment": "Hello",
+            "CommentTime": datetime(2024, 1, 1, 10, 1, 0),
+            "CommentOrder": 1,
+            "CommentLikes": 0,
+            "MainLanguage": "en",
+            "NormalizedComment": "Hello",
+            "Sentiment": "positive",
+            "ProcessedTime": datetime(2024, 1, 1, 11, 0, 0),
+            "Source": "delta",
+        }
+
+        cursor = FakeCursor(fetchone_values=[(1, 0), (1, 0)], rowcount=1)
+        conn = FakeConnection(cursor)
+
+        enrich_module.upsert_enriched_rows(conn, [row], allow_updates=True)
+        enrich_module.upsert_enriched_rows(conn, [row], allow_updates=True)
+
+        create_sql_calls = [
+            sql
+            for sql, _params in cursor.executed
+            if "CREATE TABLE #EnrichedCommentsStage" in sql
+        ]
+        drop_sql_calls = [
+            sql
+            for sql, _params in cursor.executed
+            if "DROP TABLE #EnrichedCommentsStage" in sql
+        ]
+
+        self.assertEqual(len(create_sql_calls), 2)
+        self.assertEqual(len(drop_sql_calls), 4)
+
     def test_enrich_comments(self):
         connection = FakeConnection(FakeCursor())
 
@@ -229,14 +277,14 @@ class EnrichCommentsTests(unittest.TestCase):
             enrich_module, "clear_enriched_scope", return_value=2
         ), patch.object(
             enrich_module,
-            "fetch_comment_rows",
+            "iter_comment_row_batches",
             side_effect=[
-                [],
-                [{"CommentHash": "hash-1", "Comment": "Hello"}],
+                iter([]),
+                iter([[{"CommentHash": "hash-1", "Comment": "Hello"}]]),
             ],
         ), patch.object(
             enrich_module, "load_models", return_value=object()
-        ), patch.object(
+        ) as mocked_models, patch.object(
             enrich_module, "prepare_enriched_rows", return_value=[{"CommentHash": "hash-1"}]
         ), patch.object(
             enrich_module, "upsert_enriched_rows", return_value={"processed": 1, "added_count": 1, "updated_count": 0}
@@ -251,6 +299,7 @@ class EnrichCommentsTests(unittest.TestCase):
         self.assertEqual(filled_result["selected"], 1)
         self.assertEqual(filled_result["processed"], 1)
         self.assertEqual(filled_result["mode"], "delta")
+        self.assertEqual(mocked_models.call_count, 1)
         self.assertTrue(connection.close_called)
 
     def test_parse_args(self):

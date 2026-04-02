@@ -10,8 +10,8 @@ This script:
 4. Drops unusable rows (missing text, empty text, unknown labels).
 5. Strictly balances the three classes by random undersampling.
 6. Shuffles the final dataset.
-7. Converts the result to a Hugging Face Dataset and saves it with save_to_disk().
-8. Saves a readable CSV version of the final balanced dataset.
+7. Saves a readable CSV version of the final balanced dataset.
+8. Optionally saves a Hugging Face disk dataset when explicitly requested.
 
 Example:
     python model_fine_tuning/prepare_and_balance_data.py \
@@ -28,9 +28,6 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import pandas as pd
-from datasets import Dataset
-
-
 NEGATIVE = 0
 NEUTRAL = 1
 POSITIVE = 2
@@ -73,13 +70,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         default="./balanced_sentiment_dataset",
-        help="Directory where dataset.save_to_disk() will store the balanced dataset.",
+        help="Directory where the balanced dataset exports will be saved.",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=42,
         help="Random seed used for reproducible undersampling and shuffling.",
+    )
+    parser.add_argument(
+        "--save-hf-dataset",
+        action="store_true",
+        help="Also export Hugging Face save_to_disk() artifacts. Disabled by default to avoid Arrow metadata files.",
     )
     return parser
 
@@ -92,7 +94,7 @@ def find_data_files(root_dir: Path) -> list[Path]:
         for path in root_dir.rglob("*")
         if path.is_file()
         and path.suffix.lower() in SUPPORTED_EXTENSIONS
-        and path.name not in ignore_files  # FIX 1: Ignore unhashable metadata files
+        and path.name not in ignore_files
     ]
     return sorted(files)
 
@@ -111,7 +113,6 @@ def load_file_to_dataframe(file_path: Path) -> pd.DataFrame:
         try:
             return pd.read_json(file_path, lines=suffix == ".jsonl")
         except ValueError:
-            # Fallback for regular JSON arrays/objects and mislabeled JSONL files.
             with file_path.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             if isinstance(payload, list):
@@ -145,7 +146,6 @@ def infer_text_column(frame: pd.DataFrame) -> str:
     if not object_columns:
         raise ValueError("Could not infer a text column.")
 
-    # Prefer the object column with the longest average non-empty string length.
     scored_columns = []
     for column in object_columns:
         series = frame[column].dropna().astype(str).str.strip()
@@ -156,7 +156,6 @@ def infer_text_column(frame: pd.DataFrame) -> str:
     scored_columns.sort(reverse=True)
     guessed_col = scored_columns[0][1]
 
-    # FIX 5: Log a warning if we had to guess the text column based on length
     print(f"  [warning] Guessed text column based on length: '{guessed_col}'")
     return guessed_col
 
@@ -221,7 +220,7 @@ def map_label_value(raw_label: object) -> Optional[int]:
             0: NEGATIVE,
             1: NEUTRAL,
             2: POSITIVE,
-            3: NEGATIVE,  # sarcastic/mixed/fourth class treated as negative
+            3: NEGATIVE,
             4: None,
         }
         return numeric_mapping.get(numeric)
@@ -232,13 +231,11 @@ def map_label_value(raw_label: object) -> Optional[int]:
 
     mapping = {
         "-1": NEGATIVE, "0": NEGATIVE, "1": NEUTRAL, "2": POSITIVE, "3": NEGATIVE, "4": None,
-        # English
         "negative": NEGATIVE, "neg": NEGATIVE, "bad": NEGATIVE, "bearish": NEGATIVE,
         "neutral": NEUTRAL, "neu": NEUTRAL, "objective": NEUTRAL, "other": NEUTRAL,
         "positive": POSITIVE, "pos": POSITIVE, "good": POSITIVE, "bullish": POSITIVE,
         "mixed": NEGATIVE, "sarcastic": NEGATIVE, "irony": NEGATIVE, "ironic": NEGATIVE,
         "speech": None, "skip": None, "skip_speech": None, "unknown": None, "none": None, "nan": None,
-        # Cyrillic (Ukrainian & Russian) - FIX 4
         "позитивний": POSITIVE, "позитив": POSITIVE, "положительный": POSITIVE,
         "негативний": NEGATIVE, "негатив": NEGATIVE, "отрицательный": NEGATIVE,
         "нейтральний": NEUTRAL, "нейтраль": NEUTRAL, "нейтральный": NEUTRAL,
@@ -257,13 +254,11 @@ def standardize_dataframe(frame: pd.DataFrame, file_path: Path) -> pd.DataFrame:
 
     text_column = infer_text_column(frame)
 
-    # FIX 3: Case-insensitive check for emotion columns
     frame_cols_lower = {c.lower(): c for c in frame.columns}
     emotion_cols_lower = [c.lower() for c in EMOTION_COLUMNS]
 
     if all(col in frame_cols_lower for col in emotion_cols_lower):
         print(f"  [info] Detected Emotion columns. Mapping to 3-class sentiment.")
-        # Rename columns to match expected capitalized EMOTION_COLUMNS for the apply function
         rename_map = {frame_cols_lower[col]: col.capitalize() for col in emotion_cols_lower}
         temp_frame = frame.rename(columns=rename_map)
         standardized = pd.DataFrame(
@@ -286,7 +281,6 @@ def standardize_dataframe(frame: pd.DataFrame, file_path: Path) -> pd.DataFrame:
             }
         )
 
-    # Clean up text and labels
     standardized["text"] = standardized["text"].fillna("").astype(str).str.strip()
     standardized = standardized[standardized["text"] != ""]
     standardized = standardized[standardized["label"].isin(ALLOWED_LABELS)]
@@ -298,7 +292,6 @@ def standardize_dataframe(frame: pd.DataFrame, file_path: Path) -> pd.DataFrame:
 
     print(f"  [result] Kept {final_rows:,} rows (Dropped {dropped_rows:,} invalid/unmapped rows).")
 
-    # ENHANCEMENT: Print mini distribution for this specific file
     if final_rows > 0:
         counts = standardized["label"].value_counts().reindex([NEGATIVE, NEUTRAL, POSITIVE], fill_value=0)
         print(f"  [dist]   Neg: {counts[NEGATIVE]:,} | Neu: {counts[NEUTRAL]:,} | Pos: {counts[POSITIVE]:,}")
@@ -337,6 +330,24 @@ def strictly_balance_classes(frame: pd.DataFrame, seed: int) -> pd.DataFrame:
     return balanced
 
 
+def save_balanced_dataset_exports(frame: pd.DataFrame, output_dir: Path, save_hf_dataset: bool) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    export_frame = frame[["text", "label"]]
+    csv_output_path = output_dir / "balanced_dataset.csv"
+    export_frame.to_csv(csv_output_path, index=False, encoding="utf-8")
+    print(f"[done] Balanced CSV dataset saved to: {csv_output_path}")
+
+    if not save_hf_dataset:
+        return
+
+    from datasets import Dataset
+
+    hf_dataset = Dataset.from_pandas(export_frame, preserve_index=False)
+    hf_dataset.save_to_disk(str(output_dir))
+    print(f"[done] Balanced Hugging Face dataset saved to: {output_dir}")
+
+
 def main() -> None:
     args = build_arg_parser().parse_args()
 
@@ -369,7 +380,6 @@ def main() -> None:
     combined = pd.concat(standardized_frames, ignore_index=True)
     initial_combined_len = len(combined)
 
-    # FIX 2: Drop duplicates based on text ONLY to prevent contradictory labels
     combined = combined.drop_duplicates(subset=["text"]).reset_index(drop=True)
 
     duplicates_dropped = initial_combined_len - len(combined)
@@ -381,15 +391,8 @@ def main() -> None:
     balanced = strictly_balance_classes(combined, seed=args.seed)
     print_class_distribution(balanced, "Class distribution AFTER balancing")
 
-    # 1. Save as Hugging Face Dataset
-    hf_dataset = Dataset.from_pandas(balanced[["text", "label"]], preserve_index=False)
-    hf_dataset.save_to_disk(str(output_dir))
-    print(f"\n[done] Balanced Hugging Face dataset saved to: {output_dir}")
-
-    # 2. Save as a standard CSV file
-    csv_output_path = output_dir / "balanced_dataset.csv"
-    balanced[["text", "label"]].to_csv(csv_output_path, index=False, encoding="utf-8")
-    print(f"[done] Balanced CSV dataset saved to: {csv_output_path}")
+    print()
+    save_balanced_dataset_exports(balanced, output_dir, save_hf_dataset=args.save_hf_dataset)
 
 
 if __name__ == "__main__":

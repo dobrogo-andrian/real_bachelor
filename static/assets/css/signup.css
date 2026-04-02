@@ -1,62 +1,63 @@
 .signup-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-}
-.links {
-    text-align: center;
-    margin-top: 20px;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem 1rem;
 }
 
-.links a {
-    text-decoration: none;
-    margin-right: 10px; /* Adds spacing between multiple links */
-}
 .signup-form {
-    padding: 20px;
-    border-radius: 10px;
-    width: 20vw;
-    height: 80vh;
-    display: flex;
-    flex-direction: column;
-    min-width: 300px ;
-    min-height: 350px;
+  box-sizing: border-box;
+  width: min(100%, 32rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 2rem;
+  border-radius: 1rem;
 }
 
 .signup-form h1 {
-    text-align: center;
+  text-align: center;
+  margin-bottom: 0.5rem;
 }
 
 .signup-form label {
-    margin-bottom: 5px;
+  margin-bottom: 0.25rem;
 }
 
 .signup-form input {
-    margin-bottom: 20px;
-    padding: 10px;
-    border: 1px solid;
-    border-radius: 5px;
-    min-height: 50px;
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid;
+  border-radius: 0.5rem;
+  min-height: 3.2rem;
 }
 
-.btn.signup-btn {
-    padding: 10px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: background-color 0.3s;
-}
-
-.btn.signup-btn:hover {
-    background-color: #004494;
+.signup-form .button {
+  width: 100%;
+  margin-top: 0.5rem;
 }
 
 .links {
-    text-align: center;
-    margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  text-align: center;
+  margin-top: 1rem;
 }
 
 .links a {
-    text-decoration: none;
+  text-decoration: none;
+}
+
+@media screen and (max-width: 480px) {
+  .signup-container {
+    padding: 1rem 0.75rem;
+  }
+
+  .signup-form {
+    padding: 1.5rem 1rem;
+  }
 }

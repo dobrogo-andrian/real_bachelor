@@ -1,6 +1,29 @@
 (function () {
   const session = window.CommentLabSession;
   const statusNode = document.getElementById('account-status');
+  const passwordForm = document.getElementById('password-form');
+  const verifyEmailForm = document.getElementById('verify-email-form');
+  const instagramForm = document.getElementById('instagram-form');
+  const deleteInstagramCredentialsButton = document.getElementById('delete-instagram-credentials');
+  const clearInstagramCookiesButton = document.getElementById('clear-instagram-cookies');
+
+  if (!session) {
+    return;
+  }
+
+  function setText(id, value, fallback = '') {
+    const node = document.getElementById(id);
+    if (node) {
+      node.textContent = value || fallback;
+    }
+  }
+
+  function setValue(id, value) {
+    const node = document.getElementById(id);
+    if (node) {
+      node.value = value || '';
+    }
+  }
 
   function setStatus(message, isError = false) {
     if (!statusNode) {
@@ -25,21 +48,27 @@
     const profile = payload.profile || {};
     const stats = payload.stats || {};
 
-    document.getElementById('profile-username').textContent = profile.username || 'Unknown';
-    document.getElementById('profile-email').textContent = profile.email || 'Not set';
-    document.getElementById('verification-email-display').textContent = profile.email || 'Not set';
-    document.getElementById('profile-email-verified').textContent = profile.email_verified
+    setText('profile-username', profile.username, 'Unknown');
+    setText('profile-email', profile.email, 'Not set');
+    setText('verification-email-display', profile.email, 'Not set');
+    setText(
+      'profile-email-verified',
+      profile.email_verified
       ? `Verified at ${formatDate(profile.email_verified_at)}`
-      : 'Not verified';
-    document.getElementById('profile-instagram-login').textContent = profile.instagram_login || 'Not configured';
-    document.getElementById('profile-cookie-state').textContent = profile.has_instagram_cookies
+      : 'Not verified'
+    );
+    setText('profile-instagram-login', profile.instagram_login, 'Not configured');
+    setText(
+      'profile-cookie-state',
+      profile.has_instagram_cookies
       ? `Stored session from ${formatDate(profile.instagram_cookies_updated_at)}`
-      : 'No stored Instagram session';
+      : 'No stored Instagram session'
+    );
 
-    document.getElementById('instagram-login').value = profile.instagram_login || '';
-    document.getElementById('stat-total-comments').textContent = stats.total_comments || 0;
-    document.getElementById('stat-distinct-pages').textContent = stats.distinct_pages || 0;
-    document.getElementById('stat-enriched-comments').textContent = stats.enriched_comments || 0;
+    setValue('instagram-login', profile.instagram_login);
+    setText('stat-total-comments', String(stats.total_comments || 0));
+    setText('stat-distinct-pages', String(stats.distinct_pages || 0));
+    setText('stat-enriched-comments', String(stats.enriched_comments || 0));
   }
 
   async function loadAccount() {
@@ -76,101 +105,111 @@
     return true;
   }
 
-  document.getElementById('password-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const currentPassword = document.getElementById('current-password').value;
-    const newPassword = document.getElementById('new-password').value;
-    const ok = await submitJson(
-      '/api/account/change-password',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+  if (passwordForm) {
+    passwordForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const currentPassword = document.getElementById('current-password')?.value || '';
+      const newPassword = document.getElementById('new-password')?.value || '';
+      const ok = await submitJson(
+        '/api/account/change-password',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            current_password: currentPassword,
+            new_password: newPassword,
+          }),
         },
-        body: JSON.stringify({
-          current_password: currentPassword,
-          new_password: newPassword,
-        }),
-      },
-      'Password updated successfully.'
-    );
-    if (ok) {
-      event.target.reset();
-    }
-  });
+        'Password updated successfully.'
+      );
+      if (ok) {
+        event.target.reset();
+      }
+    });
+  }
 
-  document.getElementById('verify-email-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const currentPassword = document.getElementById('verify-email-password').value;
-    const ok = await submitJson(
-      '/api/account/verify-email',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+  if (verifyEmailForm) {
+    verifyEmailForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const currentPassword = document.getElementById('verify-email-password')?.value || '';
+      const ok = await submitJson(
+        '/api/account/verify-email',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            current_password: currentPassword,
+          }),
         },
-        body: JSON.stringify({
-          current_password: currentPassword,
-        }),
-      },
-      'Email marked as verified.'
-    );
-    if (ok) {
-      event.target.reset();
-    }
-  });
+        'Email marked as verified.'
+      );
+      if (ok) {
+        event.target.reset();
+      }
+    });
+  }
 
-  document.getElementById('instagram-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const instagramLogin = document.getElementById('instagram-login').value.trim();
-    const instagramPassword = document.getElementById('instagram-password').value;
-    const ok = await submitJson(
-      '/api/account/instagram-credentials',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+  if (instagramForm) {
+    instagramForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const instagramLogin = document.getElementById('instagram-login')?.value.trim() || '';
+      const instagramPassword = document.getElementById('instagram-password')?.value || '';
+      const ok = await submitJson(
+        '/api/account/instagram-credentials',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            instagram_login: instagramLogin,
+            instagram_password: instagramPassword,
+          }),
         },
-        body: JSON.stringify({
-          instagram_login: instagramLogin,
-          instagram_password: instagramPassword,
-        }),
-      },
-      'Instagram credentials updated.'
-    );
-    if (ok) {
-      document.getElementById('instagram-password').value = '';
-    }
-  });
+        'Instagram credentials updated.'
+      );
+      if (ok) {
+        setValue('instagram-password', '');
+      }
+    });
+  }
 
-  document.getElementById('delete-instagram-credentials').addEventListener('click', async () => {
-    await submitJson(
-      '/api/account/instagram-credentials',
-      {
-        method: 'DELETE',
-        headers: {
-          Accept: 'application/json',
+  if (deleteInstagramCredentialsButton) {
+    deleteInstagramCredentialsButton.addEventListener('click', async () => {
+      await submitJson(
+        '/api/account/instagram-credentials',
+        {
+          method: 'DELETE',
+          headers: {
+            Accept: 'application/json',
+          },
         },
-      },
-      'Instagram credentials deleted.'
-    );
-  });
+        'Instagram credentials deleted.'
+      );
+    });
+  }
 
-  document.getElementById('clear-instagram-cookies').addEventListener('click', async () => {
-    await submitJson(
-      '/api/account/instagram-cookies/clear',
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
+  if (clearInstagramCookiesButton) {
+    clearInstagramCookiesButton.addEventListener('click', async () => {
+      await submitJson(
+        '/api/account/instagram-cookies/clear',
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+          },
         },
-      },
-      'Stored Instagram cookies cleared.'
-    );
-  });
+        'Stored Instagram cookies cleared.'
+      );
+    });
+  }
 
   loadAccount().catch((error) => {
     console.error(error);

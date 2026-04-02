@@ -7,7 +7,8 @@ This script:
     2. Maps the 6 emotion columns to 3-class sentiment (Negative, Neutral, Positive).
     3. Balances the classes (downsamples to the minority class).
     4. Shuffles all rows.
-    5. Saves a SINGLE unified dataset via save_to_disk() and as a CSV.
+    5. Saves a SINGLE unified dataset as a CSV.
+    6. Optionally saves Hugging Face save_to_disk() artifacts when explicitly requested.
 
 Usage examples:
     python download_dataset.py
@@ -20,7 +21,7 @@ import argparse
 import os
 
 import pandas as pd
-from datasets import Dataset, get_dataset_split_names, load_dataset
+from datasets import get_dataset_split_names, load_dataset
 
 DATASET_NAME = "ukr-detect/ukr-emotions-binary"
 
@@ -41,6 +42,11 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         default=os.path.join(".", "hf_saved_dataset"),
         help="Directory where the unified dataset will be saved.",
+    )
+    parser.add_argument(
+        "--save-hf-dataset",
+        action="store_true",
+        help="Also export Hugging Face save_to_disk() artifacts. Disabled by default to avoid Arrow metadata files.",
     )
     return parser.parse_args()
 
@@ -102,6 +108,24 @@ def build_unified_balanced_dataframe(dataset_dict: dict) -> pd.DataFrame:
     return balanced_frame
 
 
+def save_balanced_dataset_exports(frame: pd.DataFrame, output_dir: str, save_hf_dataset: bool) -> None:
+    os.makedirs(output_dir, exist_ok=True)
+
+    csv_path = os.path.join(output_dir, "full_balanced_dataset.csv")
+    print(f"[save] exporting unified CSV -> {csv_path}")
+    frame.to_csv(csv_path, index=False)
+
+    if not save_hf_dataset:
+        print("[save] skipped Hugging Face save_to_disk() export.")
+        return
+
+    from datasets import Dataset
+
+    unified_dataset = Dataset.from_pandas(frame, preserve_index=False)
+    print(f"[save] saving unified dataset to: {output_dir}")
+    unified_dataset.save_to_disk(output_dir)
+
+
 def main() -> None:
     args = parse_args()
     output_dir = os.path.abspath(args.output_dir)
@@ -121,22 +145,8 @@ def main() -> None:
     # Process into a single, balanced, shuffled Pandas DataFrame
     balanced_frame = build_unified_balanced_dataframe(dataset_dict)
 
-    # Convert back to a Hugging Face Dataset object
-    unified_dataset = Dataset.from_pandas(balanced_frame)
-
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-
-    # 1. Save as Hugging Face Arrow format
-    print(f"[save] saving unified dataset to: {output_dir}")
-    unified_dataset.save_to_disk(output_dir)
-
-    # 2. Save as a single CSV file
-    csv_path = os.path.join(output_dir, "full_balanced_dataset.csv")
-    print(f"[save] exporting unified CSV -> {csv_path}")
-    balanced_frame.to_csv(csv_path, index=False)
-
-    print("[done] unified dataset saved successfully in both Arrow and CSV formats.")
+    save_balanced_dataset_exports(balanced_frame, output_dir, save_hf_dataset=args.save_hf_dataset)
+    print("[done] unified dataset saved successfully.")
 
 
 if __name__ == "__main__":

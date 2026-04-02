@@ -5,8 +5,8 @@ Download and save the Hugging Face dataset:
 This script downloads all available splits (train, test, validation, etc.),
 concatenates them into a SINGLE unified dataset, shuffles the rows,
 and saves:
-    1. The unified dataset via save_to_disk() under ./hf_saved_dataset
-    2. A single readable CSV file containing all rows.
+    1. A single readable CSV file containing all rows.
+    2. Optionally, Hugging Face save_to_disk() artifacts when explicitly requested.
 
 Usage examples:
     python download_dataset.py
@@ -33,7 +33,27 @@ def parse_args() -> argparse.Namespace:
         default=os.path.join(".", "hf_saved_dataset"),
         help="Directory where the unified dataset will be saved.",
     )
+    parser.add_argument(
+        "--save-hf-dataset",
+        action="store_true",
+        help="Also export Hugging Face save_to_disk() artifacts. Disabled by default to avoid Arrow metadata files.",
+    )
     return parser.parse_args()
+
+
+def save_unified_dataset_exports(unified_dataset, output_dir: str, save_hf_dataset: bool) -> None:
+    os.makedirs(output_dir, exist_ok=True)
+
+    csv_path = os.path.join(output_dir, "full_dataset.csv")
+    print(f"[save] exporting unified CSV -> {csv_path}")
+    unified_dataset.to_csv(csv_path, index=False)
+
+    if not save_hf_dataset:
+        print("[save] skipped Hugging Face save_to_disk() export.")
+        return
+
+    print(f"[save] saving unified dataset to: {output_dir}")
+    unified_dataset.save_to_disk(output_dir)
 
 
 def main() -> None:
@@ -66,19 +86,8 @@ def main() -> None:
 
     print(f"[info] total rows in unified dataset: {len(unified_dataset):,}")
 
-    # Create the output directory
-    os.makedirs(output_dir, exist_ok=True)
-
-    # 1. Save as Hugging Face Arrow format
-    print(f"[save] saving unified dataset to: {output_dir}")
-    unified_dataset.save_to_disk(output_dir)
-
-    # 2. Save as a single CSV file
-    csv_path = os.path.join(output_dir, "full_dataset.csv")
-    print(f"[save] exporting unified CSV -> {csv_path}")
-    unified_dataset.to_csv(csv_path, index=False)
-
-    print("[done] unified dataset saved successfully in both Arrow and CSV formats.")
+    save_unified_dataset_exports(unified_dataset, output_dir, save_hf_dataset=args.save_hf_dataset)
+    print("[done] unified dataset saved successfully.")
 
 
 if __name__ == "__main__":
