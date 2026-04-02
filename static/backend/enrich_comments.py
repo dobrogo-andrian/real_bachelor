@@ -7,7 +7,6 @@ import warnings
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-
 import pyodbc
 from lingua.lingua import Language, LanguageDetectorBuilder
 from peft import PeftModel
@@ -19,7 +18,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("filelock").setLevel(logging.WARNING)
 logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-
 
 SUPPORTED_LANGUAGES = {"uk", "ru", "en", "other", "symbols_only"}
 DEFAULT_SENTIMENT = "neutral"
@@ -105,19 +103,23 @@ def load_models():
         use_fast=True,
         clean_up_tokenization_spaces=False,
     )
+
     base_model = AutoModelForSequenceClassification.from_pretrained(
         BASE_MODEL_NAME,
         revision=BASE_MODEL_REVISION,
         use_safetensors=True,
     )
-    model = PeftModel.from_pretrained(base_model, str(ADAPTER_DIR))
+
+    peft_model = PeftModel.from_pretrained(base_model, str(ADAPTER_DIR))
+
+    model = peft_model.merge_and_unload()
     model.eval()
 
     print(f"[sentiment] loaded base model: {BASE_MODEL_NAME} @ {BASE_MODEL_REVISION}")
-    print(f"[sentiment] loaded fine-tuned LoRA adapters: {ADAPTER_DIR}")
+    print(f"[sentiment] loaded and merged fine-tuned LoRA adapters: {ADAPTER_DIR}")
 
     return pipeline(
-        "sentiment-analysis",
+        "text-classification",
         model=model,
         tokenizer=tokenizer,
         framework="pt",
@@ -144,17 +146,16 @@ def analyze_sentiment(comment, classifier):
 
 def build_comment_query(mode, page_name=None, page_id=None):
     base_query = """
-        SELECT
-            c.[CommentHash],
-            c.[PageName],
-            c.[PageID],
-            c.[PostHref],
-            c.[PostTime],
-            c.[Comment],
-            c.[CommentTime],
-            c.[CommentLikes]
-        FROM [dbo].[Comments] AS c
-    """
+                 SELECT c.[CommentHash],
+                        c.[PageName],
+                        c.[PageID],
+                        c.[PostHref],
+                        c.[PostTime],
+                        c.[Comment],
+                        c.[CommentTime],
+                        c.[CommentLikes]
+                 FROM [dbo].[Comments] AS c \
+                 """
 
     conditions = []
     params = []
@@ -398,37 +399,41 @@ def upsert_enriched_rows(conn, rows, allow_updates=True):
             );
     """
     insert_if_missing_sql = """
-        INSERT INTO [dbo].[EnrichedComments] (
-            [CommentHash], [PageName], [PageID], [PostHref], [PostTime],
-            [CommentTime], [CommentOrder], [CommentLikes], [MainLanguage], [NormalizedComment],
-            [Sentiment], [ProcessedTime], [Source]
-        )
-        SELECT
-            source.[CommentHash], source.[PageName], source.[PageID], source.[PostHref], source.[PostTime],
-            source.[CommentTime], source.[CommentOrder], source.[CommentLikes], source.[MainLanguage], source.[NormalizedComment],
-            source.[Sentiment], source.[ProcessedTime], source.[Source]
-        FROM (
-            SELECT
-                ? AS [CommentHash],
-                ? AS [PageName],
-                ? AS [PageID],
-                ? AS [PostHref],
-                ? AS [PostTime],
-                ? AS [CommentTime],
-                ? AS [CommentOrder],
-                ? AS [CommentLikes],
-                ? AS [MainLanguage],
-                ? AS [NormalizedComment],
-                ? AS [Sentiment],
-                ? AS [ProcessedTime],
-                ? AS [Source]
-        ) AS source
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM [dbo].[EnrichedComments] AS target
-            WHERE target.[CommentHash] = source.[CommentHash]
-        );
-    """
+                            INSERT INTO [dbo].[EnrichedComments] ([CommentHash], [PageName], [PageID], [PostHref],
+                                                                  [PostTime],
+                                                                  [CommentTime], [CommentOrder], [CommentLikes],
+                                                                  [MainLanguage], [NormalizedComment],
+                                                                  [Sentiment], [ProcessedTime], [Source])
+                            SELECT source.[CommentHash],
+                                   source.[PageName],
+                                   source.[PageID],
+                                   source.[PostHref],
+                                   source.[PostTime],
+                                   source.[CommentTime],
+                                   source.[CommentOrder],
+                                   source.[CommentLikes],
+                                   source.[MainLanguage],
+                                   source.[NormalizedComment],
+                                   source.[Sentiment],
+                                   source.[ProcessedTime],
+                                   source.[Source]
+                            FROM (SELECT ? AS [CommentHash],
+                                         ? AS [PageName],
+                                         ? AS [PageID],
+                                         ? AS [PostHref],
+                                         ? AS [PostTime],
+                                         ? AS [CommentTime],
+                                         ? AS [CommentOrder],
+                                         ? AS [CommentLikes],
+                                         ? AS [MainLanguage],
+                                         ? AS [NormalizedComment],
+                                         ? AS [Sentiment],
+                                         ? AS [ProcessedTime],
+                                         ? AS [Source]) AS source
+                            WHERE NOT EXISTS (SELECT 1
+                                              FROM [dbo].[EnrichedComments] AS target
+                                              WHERE target.[CommentHash] = source.[CommentHash]); \
+                            """
     updated_count = 0
     for row in rows:
         cursor.execute(
