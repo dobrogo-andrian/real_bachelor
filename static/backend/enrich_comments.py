@@ -1,24 +1,38 @@
 import argparse
+import logging
 import os
+import re
 import unicodedata
 import warnings
 from datetime import datetime, timezone
 from functools import lru_cache
+from pathlib import Path
 
 import pyodbc
 from lingua.lingua import Language, LanguageDetectorBuilder
-from transformers import pipeline
+from peft import PeftModel
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 
 from static.backend import db_connection
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("filelock").setLevel(logging.WARNING)
+logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
 
 
 SUPPORTED_LANGUAGES = {"uk", "ru", "en", "other", "symbols_only"}
 DEFAULT_SENTIMENT = "neutral"
+BASE_MODEL_NAME = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
+BASE_MODEL_REVISION = "refs/pr/15"
+ADAPTER_DIR = Path(__file__).resolve().parents[2] / "model_fine_tuning" / "sentiment_lora_adapters"
 LINGUA_LANGUAGE_MAP = {
     Language.UKRAINIAN: "uk",
     Language.RUSSIAN: "ru",
     Language.ENGLISH: "en",
 }
+URL_PATTERN = re.compile(r"https?://\S+|www\.\S+", flags=re.IGNORECASE)
+MENTION_PATTERN = re.compile(r"@\w+")
 
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("USE_TF", "0")
@@ -40,6 +54,8 @@ def normalize_comment_for_analysis(text):
         return ""
 
     text = normalize_unicode(text)
+    text = URL_PATTERN.sub("http", text)
+    text = MENTION_PATTERN.sub("@user", text)
     return " ".join(text.split())
 
 
@@ -80,14 +96,33 @@ def detect_main_language(comment):
 
 @lru_cache(maxsize=1)
 def load_models():
-    model_name = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
+    if not ADAPTER_DIR.exists():
+        raise FileNotFoundError(f"Fine-tuned LoRA adapter directory not found: {ADAPTER_DIR}")
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        BASE_MODEL_NAME,
+        revision=BASE_MODEL_REVISION,
+        use_fast=True,
+        clean_up_tokenization_spaces=False,
+    )
+    base_model = AutoModelForSequenceClassification.from_pretrained(
+        BASE_MODEL_NAME,
+        revision=BASE_MODEL_REVISION,
+        use_safetensors=True,
+    )
+    model = PeftModel.from_pretrained(base_model, str(ADAPTER_DIR))
+    model.eval()
+
+    print(f"[sentiment] loaded base model: {BASE_MODEL_NAME} @ {BASE_MODEL_REVISION}")
+    print(f"[sentiment] loaded fine-tuned LoRA adapters: {ADAPTER_DIR}")
+
     return pipeline(
         "sentiment-analysis",
-        model=model_name,
-        tokenizer=model_name,
+        model=model,
+        tokenizer=tokenizer,
         framework="pt",
         truncation=True,
-        max_length=512,
+        max_length=128,
     )
 
 
