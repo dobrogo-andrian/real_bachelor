@@ -1,4 +1,54 @@
 ﻿.advanced-shell,
+.advanced-banner .advanced-banner-inner {
+    width: min(72rem, calc(100% - 5rem));
+}
+
+.advanced-banner {
+    min-height: 36rem;
+    max-height: none;
+    height: auto;
+    padding: 7em 0 4.5em 0;
+    align-items: flex-start;
+}
+
+.advanced-banner .advanced-banner-header,
+.advanced-banner .advanced-hero-copy,
+.advanced-banner .advanced-hero-grid {
+    max-width: 58rem;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.advanced-banner .advanced-banner-header h1 {
+    margin-bottom: 0;
+    font-size: clamp(3.4rem, 7vw, 5.8rem);
+}
+
+.advanced-banner .advanced-hero-copy p {
+    max-width: 46rem;
+    margin-bottom: 0;
+}
+
+.advanced-banner .advanced-hero-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.15rem;
+}
+
+.advanced-banner .advanced-hero-grid .hero-stat {
+    min-height: 12.5rem;
+    padding: 1.3rem 1.4rem;
+}
+
+.advanced-banner .advanced-hero-grid .hero-stat strong {
+    font-size: clamp(1.4rem, 2vw, 2rem);
+    line-height: 1.15;
+}
+
+.advanced-banner .advanced-hero-grid .hero-stat span:last-child {
+    font-size: 0.95rem;
+}
+
+.advanced-shell,
             .summary-grid,
             .preview-grid {
                 display: grid;
@@ -287,12 +337,169 @@
             }
 
             @media screen and (max-width: 980px) {
+                .advanced-banner {
+                    min-height: 0;
+                    padding: 6.5em 0 3.5em 0;
+                }
+
+                .advanced-banner .advanced-banner-inner {
+                    width: min(100%, calc(100% - 3rem));
+                }
+
+                .advanced-banner .advanced-hero-grid {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }
+
                 .advanced-grid,
                 .preview-grid,
                 .summary-grid,
                 .analysis-chart-gallery,
                 .form-row {
                     grid-template-columns: 1fr;
+                }
+            }
+
+            @media screen and (max-width: 736px) {
+                .advanced-banner {
+                    padding: 5.5em 0 2.5em 0;
+                }
+
+                .advanced-banner .advanced-banner-inner {
+                    width: min(100%, calc(100% - 2rem));
+                }
+
+                .advanced-banner .advanced-banner-header h1 {
+                    font-size: clamp(2.8rem, 14vw, 4rem);
+                }
+
+                .advanced-banner .advanced-hero-grid {
+                    grid-template-columns: 1fr;
+                }
+
+                .advanced-banner .advanced-hero-grid .hero-stat {
+                    min-height: 0;
+                    padding: 1.15rem 1.2rem;
+                }
+            }
+
+            /* Final hero layout override for Advanced Analysis */
+            .advanced-banner {
+                min-height: 33rem;
+                height: auto;
+                max-height: none;
+                padding: 6.5em 0 3.5em 0;
+                align-items: flex-start;
+            }
+
+            .advanced-banner .advanced-banner-inner {
+                width: min(72rem, calc(100% - 5rem));
+                display: grid;
+                gap: 1.6rem;
+                margin: 0 auto;
+            }
+
+            .advanced-banner .advanced-banner-header {
+                max-width: 54rem;
+                margin: 0;
+            }
+
+            .advanced-banner .advanced-banner-header h1 {
+                margin-bottom: 0;
+                font-size: clamp(3.4rem, 7vw, 5.6rem);
+                line-height: 0.98;
+            }
+
+            .advanced-banner .advanced-hero-copy {
+                display: block;
+                max-width: 47rem;
+                margin: 0;
+            }
+
+            .advanced-banner .advanced-hero-copy > * {
+                margin-right: 0;
+                margin-bottom: 0;
+            }
+
+            .advanced-banner .advanced-hero-copy p {
+                margin: 0;
+                max-width: none;
+                font-size: 0.8rem;
+                line-height: 1.9;
+                letter-spacing: 0.2em;
+            }
+
+            .advanced-banner .advanced-hero-grid {
+                width: 100%;
+                max-width: none;
+                margin: 0.4rem 0 0;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 1.25rem;
+                align-items: stretch;
+            }
+
+            .advanced-banner .advanced-hero-grid .hero-stat {
+                min-height: 0;
+                padding: 1.35rem 1.45rem;
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-start;
+                gap: 0.7rem;
+                background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.05));
+                box-shadow: 0 1rem 2.4rem rgba(16, 20, 38, 0.18);
+            }
+
+            .advanced-banner .advanced-hero-grid .hero-stat strong {
+                margin-bottom: 0;
+                font-size: clamp(1.45rem, 2vw, 1.95rem);
+                line-height: 1.12;
+            }
+
+            .advanced-banner .advanced-hero-grid .hero-stat span:last-child {
+                font-size: 0.95rem;
+                line-height: 1.55;
+            }
+
+            @media screen and (max-width: 980px) {
+                .advanced-banner {
+                    padding: 6em 0 3em 0;
+                }
+
+                .advanced-banner .advanced-banner-inner {
+                    width: min(100%, calc(100% - 3rem));
+                }
+
+                .advanced-banner .advanced-hero-grid {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }
+            }
+
+            @media screen and (max-width: 736px) {
+                .advanced-banner {
+                    padding: 5.25em 0 2.25em 0;
+                }
+
+                .advanced-banner .advanced-banner-inner {
+                    width: min(100%, calc(100% - 2rem));
+                    gap: 1.25rem;
+                }
+
+                .advanced-banner .advanced-banner-header h1 {
+                    font-size: clamp(2.8rem, 13vw, 4rem);
+                }
+
+                .advanced-banner .advanced-hero-copy p {
+                    font-size: 0.74rem;
+                    line-height: 1.8;
+                    letter-spacing: 0.16em;
+                }
+
+                .advanced-banner .advanced-hero-grid {
+                    grid-template-columns: 1fr;
+                    gap: 1rem;
+                }
+
+                .advanced-banner .advanced-hero-grid .hero-stat {
+                    padding: 1.2rem;
                 }
             }
 
