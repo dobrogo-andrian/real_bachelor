@@ -19,21 +19,27 @@ real_bachelor/
 |-- app.py
 |-- README.md
 |-- PROJECT_STRUCTURE.md
-|-- TODO.md
+|-- THESIS_CONTEXT.md
 |-- LICENSE.txt
 |-- requirements.txt
+|-- run_tests.py
+|-- .env
+|-- .env.example
+|-- .gitignore
+|-- env_config.py
 |-- ddl/
 |   |-- Comments.sql
 |   |-- EnrichedComments.sql
-|   |-- migrations/
-|   |-- Users_AddInstagramCookies.sql
 |   `-- Users.sql
 |-- model_fine_tuning/
 |   |-- common.py
+|   |-- evaluate_sentiment_models.py
 |   |-- prepare_and_balance_data.py
 |   |-- train_lora_sentiment.py
 |   |-- balanced_sentiment_dataset/
+|   |-- artifacts/
 |   |-- sentiment_lora_adapters/
+|   |-- sismetanin-rusentitweet-blob-main-rusentitweet-full/
 |   |-- Sp1786-multiclass-sentiment-analysis-dataset/
 |   |-- ukr-detect-ukr-emotions-binary/
 |   `-- symbols/
@@ -319,3 +325,4 @@ It also includes:
 - The repository also contains IDE metadata under `.idea/`.
 - The repository worktree includes generated files such as `__pycache__/`.
 - The repository includes generated training artifacts under `model_fine_tuning/sentiment_lora_adapters/`.
+- `ddl/` currently contains exactly three tracked schema files: `Users.sql`, `Comments.sql`, and `EnrichedComments.sql`.

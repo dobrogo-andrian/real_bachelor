@@ -1,0 +1,142 @@
+{
+  "dataset": {
+    "csv_path": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\balanced_sentiment_dataset\\balanced_dataset.csv",
+    "validation_sample_count": 5919,
+    "seed": 42,
+    "max_length": 128
+  },
+  "baseline_model": {
+    "model_name": "cardiffnlp/twitter-xlm-roberta-base-sentiment",
+    "metrics": {
+      "sample_count": 5919,
+      "accuracy": 0.6996114208481162,
+      "precision_macro": 0.6995042648334571,
+      "recall_macro": 0.7005514554052962,
+      "f1_macro": 0.6948965913881809,
+      "roc_auc_ovr_macro": 0.8571218642575111,
+      "confusion_matrix": [
+        [
+          1571,
+          275,
+          111
+        ],
+        [
+          621,
+          1036,
+          336
+        ],
+        [
+          182,
+          253,
+          1534
+        ]
+      ],
+      "labels": [
+        "Negative",
+        "Neutral",
+        "Positive"
+      ],
+      "per_class": {
+        "Negative": {
+          "precision": 0.6617523167649537,
+          "recall": 0.8027593254982115,
+          "f1": 0.7254675594550912,
+          "support": 1957
+        },
+        "Neutral": {
+          "precision": 0.6624040920716112,
+          "recall": 0.5198193677872553,
+          "f1": 0.5825133539499578,
+          "support": 1993
+        },
+        "Positive": {
+          "precision": 0.7743563856638062,
+          "recall": 0.7790756729304216,
+          "f1": 0.7767088607594936,
+          "support": 1969
+        }
+      }
+    }
+  },
+  "fine_tuned_model": {
+    "model_name": "cardiffnlp/twitter-xlm-roberta-base-sentiment",
+    "adapter_dir": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\sentiment_lora_adapters",
+    "metrics": {
+      "sample_count": 5919,
+      "accuracy": 0.7974319986484203,
+      "precision_macro": 0.7966669005906711,
+      "recall_macro": 0.7979167809759827,
+      "f1_macro": 0.7967694982592616,
+      "roc_auc_ovr_macro": 0.9353759336779376,
+      "confusion_matrix": [
+        [
+          1648,
+          252,
+          57
+        ],
+        [
+          359,
+          1396,
+          238
+        ],
+        [
+          75,
+          218,
+          1676
+        ]
+      ],
+      "labels": [
+        "Negative",
+        "Neutral",
+        "Positive"
+      ],
+      "per_class": {
+        "Negative": {
+          "precision": 0.7915465898174832,
+          "recall": 0.8421052631578947,
+          "f1": 0.8160435751423619,
+          "support": 1957
+        },
+        "Neutral": {
+          "precision": 0.7481243301178992,
+          "recall": 0.7004515805318615,
+          "f1": 0.7235034983156258,
+          "support": 1993
+        },
+        "Positive": {
+          "precision": 0.8503297818366311,
+          "recall": 0.851193499238192,
+          "f1": 0.8507614213197969,
+          "support": 1969
+        }
+      }
+    }
+  },
+  "comparison_summary": {
+    "accuracy": {
+      "baseline": 0.6996114208481162,
+      "fine_tuned": 0.7974319986484203,
+      "delta": 0.09782057780030406
+    },
+    "precision_macro": {
+      "baseline": 0.6995042648334571,
+      "fine_tuned": 0.7966669005906711,
+      "delta": 0.09716263575721407
+    },
+    "recall_macro": {
+      "baseline": 0.7005514554052962,
+      "fine_tuned": 0.7979167809759827,
+      "delta": 0.09736532557068656
+    },
+    "f1_macro": {
+      "baseline": 0.6948965913881809,
+      "fine_tuned": 0.7967694982592616,
+      "delta": 0.10187290687108064
+    },
+    "roc_auc_ovr_macro": {
+      "baseline": 0.8571218642575111,
+      "fine_tuned": 0.9353759336779376,
+      "delta": 0.07825406942042645
+    }
+  }
+}

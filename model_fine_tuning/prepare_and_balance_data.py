@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 import pandas as pd
 NEGATIVE = 0
@@ -34,6 +34,26 @@ POSITIVE = 2
 ALLOWED_LABELS = {NEGATIVE, NEUTRAL, POSITIVE}
 
 SUPPORTED_EXTENSIONS = {".csv", ".json", ".jsonl", ".parquet"}
+IGNORED_DIRECTORY_NAMES = {
+    "__pycache__",
+    "artifacts",
+    "balanced_sentiment_dataset",
+    "sentiment_lora_adapters",
+    "trainer_artifacts",
+}
+IGNORED_FILE_NAMES = {
+    "dataset_info.json",
+    "state.json",
+    "dataset_dict.json",
+    "dataset_manifest.json",
+    "model_comparison.json",
+    "adapter_config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "trainer_state.json",
+    "training_args.bin",
+}
 TEXT_COLUMN_CANDIDATES = (
     "text",
     "tweet",
@@ -88,13 +108,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def find_data_files(root_dir: Path) -> list[Path]:
     """Recursively discover supported data files, ignoring Hugging Face metadata files."""
-    ignore_files = {"dataset_info.json", "state.json", "dataset_dict.json"}
     files = [
         path
         for path in root_dir.rglob("*")
         if path.is_file()
         and path.suffix.lower() in SUPPORTED_EXTENSIONS
-        and path.name not in ignore_files
+        and path.name not in IGNORED_FILE_NAMES
+        and not any(parent.name in IGNORED_DIRECTORY_NAMES for parent in path.parents)
     ]
     return sorted(files)
 
@@ -130,6 +150,22 @@ def pick_first_existing_column(columns: Iterable[str], candidates: Iterable[str]
         if candidate.lower() in normalized:
             return normalized[candidate.lower()]
     return None
+
+
+def build_label_distribution(frame: pd.DataFrame) -> dict[str, int]:
+    if "label" not in frame.columns or frame.empty:
+        return {
+            "negative": 0,
+            "neutral": 0,
+            "positive": 0,
+        }
+
+    counts = frame["label"].value_counts().reindex([NEGATIVE, NEUTRAL, POSITIVE], fill_value=0)
+    return {
+        "negative": int(counts[NEGATIVE]),
+        "neutral": int(counts[NEUTRAL]),
+        "positive": int(counts[POSITIVE]),
+    }
 
 
 def infer_text_column(frame: pd.DataFrame) -> str:
@@ -243,22 +279,37 @@ def map_label_value(raw_label: object) -> Optional[int]:
     return mapping.get(value)
 
 
-def standardize_dataframe(frame: pd.DataFrame, file_path: Path) -> pd.DataFrame:
+def standardize_dataframe(frame: pd.DataFrame, file_path: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Convert one dataset into the exact target schema: text + label."""
     initial_rows = len(frame)
     print(f"\n[process] Analyzing {file_path.name} ({initial_rows:,} rows)...")
+    provenance: dict[str, Any] = {
+        "file_name": file_path.name,
+        "file_path": str(file_path),
+        "file_extension": file_path.suffix.lower(),
+        "raw_row_count": int(initial_rows),
+        "status": "processed",
+        "text_column": None,
+        "label_source": None,
+        "standardized_row_count": 0,
+        "dropped_row_count": 0,
+        "class_distribution": build_label_distribution(pd.DataFrame(columns=["label"])),
+    }
 
     if frame.empty:
         print(f"  [skip] File is empty.")
-        return pd.DataFrame(columns=["text", "label"])
+        provenance["status"] = "skipped_empty"
+        return pd.DataFrame(columns=["text", "label"]), provenance
 
     text_column = infer_text_column(frame)
+    provenance["text_column"] = text_column
 
     frame_cols_lower = {c.lower(): c for c in frame.columns}
     emotion_cols_lower = [c.lower() for c in EMOTION_COLUMNS]
 
     if all(col in frame_cols_lower for col in emotion_cols_lower):
         print(f"  [info] Detected Emotion columns. Mapping to 3-class sentiment.")
+        provenance["label_source"] = "emotion_columns"
         rename_map = {frame_cols_lower[col]: col.capitalize() for col in emotion_cols_lower}
         temp_frame = frame.rename(columns=rename_map)
         standardized = pd.DataFrame(
@@ -271,9 +322,11 @@ def standardize_dataframe(frame: pd.DataFrame, file_path: Path) -> pd.DataFrame:
         label_column = infer_label_column(frame)
         if label_column is None:
             print(f"  [skip] Could not infer a label column.")
-            return pd.DataFrame(columns=["text", "label"])
+            provenance["status"] = "skipped_missing_label"
+            return pd.DataFrame(columns=["text", "label"]), provenance
 
         print(f"  [info] Mapped label column '{label_column}' to 3-class sentiment.")
+        provenance["label_source"] = label_column
         standardized = pd.DataFrame(
             {
                 "text": frame[text_column],
@@ -289,6 +342,9 @@ def standardize_dataframe(frame: pd.DataFrame, file_path: Path) -> pd.DataFrame:
 
     final_rows = len(standardized)
     dropped_rows = initial_rows - final_rows
+    provenance["standardized_row_count"] = int(final_rows)
+    provenance["dropped_row_count"] = int(dropped_rows)
+    provenance["class_distribution"] = build_label_distribution(standardized)
 
     print(f"  [result] Kept {final_rows:,} rows (Dropped {dropped_rows:,} invalid/unmapped rows).")
 
@@ -296,7 +352,7 @@ def standardize_dataframe(frame: pd.DataFrame, file_path: Path) -> pd.DataFrame:
         counts = standardized["label"].value_counts().reindex([NEGATIVE, NEUTRAL, POSITIVE], fill_value=0)
         print(f"  [dist]   Neg: {counts[NEGATIVE]:,} | Neu: {counts[NEUTRAL]:,} | Pos: {counts[POSITIVE]:,}")
 
-    return standardized
+    return standardized, provenance
 
 
 def print_class_distribution(frame: pd.DataFrame, title: str) -> None:
@@ -330,13 +386,31 @@ def strictly_balance_classes(frame: pd.DataFrame, seed: int) -> pd.DataFrame:
     return balanced
 
 
-def save_balanced_dataset_exports(frame: pd.DataFrame, output_dir: Path, save_hf_dataset: bool) -> None:
+def write_dataset_manifest(output_dir: Path, manifest: dict[str, Any] | None) -> None:
+    manifest_payload = manifest or {
+        "dataset_name": "balanced_sentiment_dataset",
+        "provenance_status": "placeholder",
+        "note": "Detailed provenance was not provided by the caller. Rebuild the dataset through prepare_and_balance_data.py main() to capture full manifest metadata.",
+        "source_files": [],
+    }
+    manifest_path = output_dir / "dataset_manifest.json"
+    manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[done] Dataset manifest saved to: {manifest_path}")
+
+
+def save_balanced_dataset_exports(
+    frame: pd.DataFrame,
+    output_dir: Path,
+    save_hf_dataset: bool,
+    manifest: dict[str, Any] | None = None,
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     export_frame = frame[["text", "label"]]
     csv_output_path = output_dir / "balanced_dataset.csv"
     export_frame.to_csv(csv_output_path, index=False, encoding="utf-8")
     print(f"[done] Balanced CSV dataset saved to: {csv_output_path}")
+    write_dataset_manifest(output_dir, manifest)
 
     if not save_hf_dataset:
         return
@@ -346,6 +420,36 @@ def save_balanced_dataset_exports(frame: pd.DataFrame, output_dir: Path, save_hf
     hf_dataset = Dataset.from_pandas(export_frame, preserve_index=False)
     hf_dataset.save_to_disk(str(output_dir))
     print(f"[done] Balanced Hugging Face dataset saved to: {output_dir}")
+
+
+def build_dataset_manifest(
+    *,
+    input_dir: Path,
+    output_dir: Path,
+    seed: int,
+    discovered_files: list[Path],
+    source_details: list[dict[str, Any]],
+    combined_frame: pd.DataFrame,
+    balanced_frame: pd.DataFrame,
+    duplicates_dropped: int,
+    save_hf_dataset: bool,
+) -> dict[str, Any]:
+    return {
+        "dataset_name": "balanced_sentiment_dataset",
+        "input_dir": str(input_dir),
+        "output_dir": str(output_dir),
+        "seed": int(seed),
+        "save_hf_dataset": bool(save_hf_dataset),
+        "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
+        "discovered_file_count": len(discovered_files),
+        "discovered_files": [str(path) for path in discovered_files],
+        "duplicates_dropped_by_text": int(duplicates_dropped),
+        "combined_unique_row_count": int(len(combined_frame)),
+        "balanced_row_count": int(len(balanced_frame)),
+        "combined_class_distribution": build_label_distribution(combined_frame),
+        "balanced_class_distribution": build_label_distribution(balanced_frame),
+        "source_files": source_details,
+    }
 
 
 def main() -> None:
@@ -365,14 +469,35 @@ def main() -> None:
     print(f"[scan] Discovered {len(files)} supported files.")
 
     standardized_frames = []
+    source_details: list[dict[str, Any]] = []
     for file_path in files:
         try:
             raw_frame = load_file_to_dataframe(file_path)
-            standardized = standardize_dataframe(raw_frame, file_path)
+            standardized, provenance = standardize_dataframe(raw_frame, file_path)
+            source_details.append(provenance)
             if not standardized.empty:
                 standardized_frames.append(standardized)
         except Exception as exc:  # noqa: BLE001
             print(f"  [error] Failed to process {file_path.name}: {exc}")
+            source_details.append(
+                {
+                    "file_name": file_path.name,
+                    "file_path": str(file_path),
+                    "file_extension": file_path.suffix.lower(),
+                    "status": "failed",
+                    "error": str(exc),
+                    "raw_row_count": None,
+                    "text_column": None,
+                    "label_source": None,
+                    "standardized_row_count": 0,
+                    "dropped_row_count": 0,
+                    "class_distribution": {
+                        "negative": 0,
+                        "neutral": 0,
+                        "positive": 0,
+                    },
+                }
+            )
 
     if not standardized_frames:
         raise ValueError("No usable rows were produced from the discovered files.")
@@ -392,7 +517,23 @@ def main() -> None:
     print_class_distribution(balanced, "Class distribution AFTER balancing")
 
     print()
-    save_balanced_dataset_exports(balanced, output_dir, save_hf_dataset=args.save_hf_dataset)
+    manifest = build_dataset_manifest(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        seed=args.seed,
+        discovered_files=files,
+        source_details=source_details,
+        combined_frame=combined,
+        balanced_frame=balanced,
+        duplicates_dropped=duplicates_dropped,
+        save_hf_dataset=args.save_hf_dataset,
+    )
+    save_balanced_dataset_exports(
+        balanced,
+        output_dir,
+        save_hf_dataset=args.save_hf_dataset,
+        manifest=manifest,
+    )
 
 
 if __name__ == "__main__":

@@ -105,11 +105,9 @@ pip install -r requirements.txt
    - Abuse-control defaults are configurable through `RATE_LIMIT_*` variables for `/login`, `/process-data`, `/enrich-comments`, and the analysis APIs. The shipped defaults are biased toward avoiding brute-force and bot activity, with looser thresholds for login and analysis than for the heavier processing routes.
 4. Create the SQL Server database and tables from:
    - `ddl/Users.sql`
-   - `ddl/Users_AddInstagramCookies.sql` for existing databases that need the new cookie columns
    - `ddl/Comments.sql`
    - `ddl/EnrichedComments.sql`
-   - For an existing database, apply `ddl/migrations/001_harden_users_password_storage.sql`
-   - Apply `ddl/migrations/002_optimize_comment_and_enrichedcomments_indexes.sql` for the current comment/enrichment indexes
+   - The repository currently contains only these three schema files; there is no separate `ddl/migrations/` folder in the tracked tree.
 5. Update `CHROMEDRIVER_PATH` in `.env` if ChromeDriver is not on your PATH.
 6. Start the Flask app:
 

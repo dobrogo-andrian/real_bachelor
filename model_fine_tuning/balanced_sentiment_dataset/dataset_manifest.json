@@ -1,0 +1,99 @@
+{
+  "dataset_name": "balanced_sentiment_dataset",
+  "input_dir": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning",
+  "output_dir": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\balanced_sentiment_dataset",
+  "seed": 42,
+  "save_hf_dataset": false,
+  "supported_extensions": [
+    ".csv",
+    ".json",
+    ".jsonl",
+    ".parquet"
+  ],
+  "discovered_file_count": 4,
+  "discovered_files": [
+    "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\sismetanin-rusentitweet-blob-main-rusentitweet-full\\rusentitweet_full.csv",
+    "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\Sp1786-multiclass-sentiment-analysis-dataset\\hf_saved_dataset\\full_dataset.csv",
+    "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\symbols\\slang_data.csv",
+    "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\ukr-detect-ukr-emotions-binary\\hf_saved_dataset\\full_balanced_dataset.csv"
+  ],
+  "duplicates_dropped_by_text": 52,
+  "combined_unique_row_count": 64725,
+  "balanced_row_count": 59184,
+  "combined_class_distribution": {
+    "negative": 19728,
+    "neutral": 24632,
+    "positive": 20365
+  },
+  "balanced_class_distribution": {
+    "negative": 19728,
+    "neutral": 19728,
+    "positive": 19728
+  },
+  "source_files": [
+    {
+      "file_name": "rusentitweet_full.csv",
+      "file_path": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\sismetanin-rusentitweet-blob-main-rusentitweet-full\\rusentitweet_full.csv",
+      "file_extension": ".csv",
+      "raw_row_count": 13392,
+      "status": "processed",
+      "text_column": "text",
+      "label_source": "label",
+      "standardized_row_count": 11053,
+      "dropped_row_count": 2339,
+      "class_distribution": {
+        "negative": 3298,
+        "neutral": 5341,
+        "positive": 2414
+      }
+    },
+    {
+      "file_name": "full_dataset.csv",
+      "file_path": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\Sp1786-multiclass-sentiment-analysis-dataset\\hf_saved_dataset\\full_dataset.csv",
+      "file_extension": ".csv",
+      "raw_row_count": 41643,
+      "status": "processed",
+      "text_column": "text",
+      "label_source": "label",
+      "standardized_row_count": 41642,
+      "dropped_row_count": 1,
+      "class_distribution": {
+        "negative": 12168,
+        "neutral": 15506,
+        "positive": 13968
+      }
+    },
+    {
+      "file_name": "slang_data.csv",
+      "file_path": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\symbols\\slang_data.csv",
+      "file_extension": ".csv",
+      "raw_row_count": 8617,
+      "status": "processed",
+      "text_column": "text",
+      "label_source": "label",
+      "standardized_row_count": 8617,
+      "dropped_row_count": 0,
+      "class_distribution": {
+        "negative": 3116,
+        "neutral": 2291,
+        "positive": 3210
+      }
+    },
+    {
+      "file_name": "full_balanced_dataset.csv",
+      "file_path": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\ukr-detect-ukr-emotions-binary\\hf_saved_dataset\\full_balanced_dataset.csv",
+      "file_extension": ".csv",
+      "raw_row_count": 3465,
+      "status": "processed",
+      "text_column": "text",
+      "label_source": "emotion_columns",
+      "standardized_row_count": 3465,
+      "dropped_row_count": 0,
+      "class_distribution": {
+        "negative": 1155,
+        "neutral": 1505,
+        "positive": 805
+      }
+    }
+  ]
+}
