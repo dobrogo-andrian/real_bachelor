@@ -2,6 +2,8 @@
 
 `real_bachelor` is a Flask application for collecting Instagram comments, loading them into SQL Server, enriching them with language and sentiment metadata, and exploring the result through authenticated web pages.
 
+Full local deployment instructions are available in `DEPLOYMENT.md`.
+
 ## What the project does
 
 - Authenticates users with JWT cookies.
