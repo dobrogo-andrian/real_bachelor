@@ -36,7 +36,7 @@
 - короткі та шумні тексти: перед аналізом коментарі нормалізуються, URL зводяться до `http`, згадки користувачів до `@user`, а довжина тексту обрізається до `max_length=128` токенів (`static/backend/enrich_comments.py:61-68`, `132-139`);
 - обмеження платформи Instagram: проект не використовує офіційний API, а працює через Selenium scraping, з обробкою `checkpoint/challenge` та ручним логіном (`static/backend/extract_data.py:256-295`, `901-1065`).
 
-У межах цього репозиторію не знайдено готового зовнішнього модуля, який одночасно закриває збір Instagram-коментарів, багатомовне визначення мови, донавчений sentiment-модуль, захищене зберігання облікових даних та веб-візуалізацію результатів. Формальний ринковий огляд аналогів потрібно додати окремо в підрозділ 2.2.
+за допомогою різних модулів проєкт виконує збір Instagram-коментарів, багатомовне визначення мови, донавчений sentiment-модуль, захищене зберігання облікових даних та веб-візуалізацію результатів. Формальний ринковий огляд аналогів ми додамо окремо в підрозділ 2.2.
 
 ### 1.2. Мета і завдання дослідження
 
@@ -99,7 +99,6 @@
 
 - серверна підготовка chart-ready структур у Python (`static/backend/explorer_analysis.py:473-526`);
 - фронтенд-рендеринг графіків через кастомний SVG у vanilla JavaScript (`static/assets/js/explorer-page.js:205-406`, `static/assets/js/advanced-analysis-page.js:299-531`);
-- бібліотеки `plotly`, `chart.js` або `matplotlib` у production UI не використовуються.
 
 ### 1.6. Практичне значення
 
@@ -268,12 +267,12 @@
 - Розподіл класів: `0:19728; 1:19728; 2:19728`
 - Як створювався:
   - рекурсивний пошук `.csv/.json/.jsonl/.parquet` (`prepare_and_balance_data.py:89-100`);
-  - автоматичне визначення `text` і `label` колонок (`prepare_and_balance_data.py:135-186`);
+  - автоматичне визна*чення `text` і `label` колонок (`prepare_and_balance_data.py:135-186`);
   - мапування різнорідних label values до 3-класової схеми (`prepare_and_balance_data.py:189-243`);
   - видалення порожніх/невірно розмічених рядків (`prepare_and_balance_data.py:284-287`);
   - видалення duplicate `text` (`prepare_and_balance_data.py:380-386`);
   - strict undersampling balancing (`prepare_and_balance_data.py:313-330`).
-- Provenance для `balanced_dataset.csv` фіксується у `model_fine_tuning/balanced_sentiment_dataset/dataset_manifest.json`, який формується скриптом `model_fine_tuning/prepare_and_balance_data.py` і містить перелік source files, row counts до/після нормалізації, спосіб мапінгу label, class distribution, seed та параметри експорту.
+- Provenance для `balanced_dataset.csv` фіксується у `model_fine_tuning/balanced_sentiment_dataset/dataset_manifest.json`, який формується скриптом `model_fine_tuning/prepare_and_balance_data.py` і містить перелік source files, row counts до/після нормалізації, спосіб мапінгу label, class distribution, seed та параметри експорту.*
 
 ### 3.4. Конкретизація функціонування системи
 
@@ -361,9 +360,46 @@
 
 ---
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## 4. РОЗДІЛ 3: МЕТОДИ ТА ПРОГРАМНІ ЗАСОБИ (10–15% ≈ 7–13 стор.)
 
-### 4.1. Обґрунтування вибору типу задачі та методу розв'язання
+``### 4.1. Обґрунтування вибору типу задачі та методу розв'язання
 
 **Тип задачі**
 
@@ -409,7 +445,7 @@
 - бібліотека: `lingua-language-detector` (`static/backend/enrich_comments.py:11`)
 - функції: `get_language_detector()`, `_detect_with_lingua()`, `detect_main_language()` (`static/backend/enrich_comments.py:75-103`)
 - вихідні класи: `uk`, `ru`, `en`, `other`, `symbols_only`
-
+``
 ### 4.2. Вибір та обґрунтування засобів розв'язання задачі
 
 | Категорія | Засіб | Версія | Підтвердження | Примітка |
@@ -462,7 +498,7 @@
 | `tests/` | unit, route, smoke tests |
 | `run_tests.py` | запуск усієї test suite |
 | `README.md` | технічний опис проекту |
-| `PROJECT_STRUCTURE.md` | окремий опис структури, частково застарілий |
+| `PROJECT_STRUCTURE.md` | окремий опис структури |
 
 #### Веб-інтерфейс (сторінки)
 
@@ -1289,4 +1325,3 @@ werkzeug==3.1.3
 - `run_tests.py` збирає suite через `unittest.defaultTestLoader.discover("tests")` (`run_tests.py:6-36`).
 - У route tests перевіряються сценарії успішного/неуспішного логіну, CSRF, rate limiting, process-data validation, background flow (`tests/routes/test_auth_routes.py`, `tests/routes/test_process_flow_routes.py`).
 - У production UI графіки не залежать від сторонніх chart-бібліотек; система відмальовує їх сама через SVG-рендерери.
-- `PROJECT_STRUCTURE.md` і `README.md` частково розходяться з реальним станом репозиторію. Для диплома потрібно брати за основу цей файл `THESIS_CONTEXT.md`, а не старі технічні нотатки.

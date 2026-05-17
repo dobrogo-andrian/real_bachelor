@@ -1,0 +1,7 @@
+model,class,precision,recall,f1,support
+baseline,Positive,0.774356,0.779076,0.776709,1969
+baseline,Neutral,0.662404,0.519819,0.582513,1993
+baseline,Negative,0.661752,0.802759,0.725468,1957
+fine_tuned,Positive,0.850330,0.851193,0.850761,1969
+fine_tuned,Neutral,0.748124,0.700452,0.723503,1993
+fine_tuned,Negative,0.791547,0.842105,0.816044,1957

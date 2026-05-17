@@ -112,6 +112,112 @@
       }
     }
   },
+  "classic_baselines": {
+    "tfidf_logreg": {
+      "metrics": {
+        "sample_count": 5919,
+        "accuracy": 0.6509545531339753,
+        "precision_macro": 0.6678708452525676,
+        "recall_macro": 0.6508671333307666,
+        "f1_macro": 0.6550501046870366,
+        "roc_auc_ovr_macro": 0.8340539282490423,
+        "confusion_matrix": [
+          [
+            1244,
+            596,
+            117
+          ],
+          [
+            407,
+            1325,
+            261
+          ],
+          [
+            145,
+            540,
+            1284
+          ]
+        ],
+        "labels": [
+          "Negative",
+          "Neutral",
+          "Positive"
+        ],
+        "per_class": {
+          "Negative": {
+            "precision": 0.6926503340757239,
+            "recall": 0.6356668369954012,
+            "f1": 0.6629363176125767,
+            "support": 1957
+          },
+          "Neutral": {
+            "precision": 0.5383990247866721,
+            "recall": 0.6648268941294531,
+            "f1": 0.5949708127525819,
+            "support": 1993
+          },
+          "Positive": {
+            "precision": 0.7725631768953068,
+            "recall": 0.6521076688674454,
+            "f1": 0.7072431836959515,
+            "support": 1969
+          }
+        }
+      }
+    },
+    "tfidf_linear_svm": {
+      "metrics": {
+        "sample_count": 5919,
+        "accuracy": 0.640310863321507,
+        "precision_macro": 0.6512523146923391,
+        "recall_macro": 0.6403586449734443,
+        "f1_macro": 0.6436627936377701,
+        "roc_auc_ovr_macro": 0.8202230491903432,
+        "confusion_matrix": [
+          [
+            1236,
+            583,
+            138
+          ],
+          [
+            435,
+            1244,
+            314
+          ],
+          [
+            157,
+            502,
+            1310
+          ]
+        ],
+        "labels": [
+          "Negative",
+          "Neutral",
+          "Positive"
+        ],
+        "per_class": {
+          "Negative": {
+            "precision": 0.6761487964989059,
+            "recall": 0.631578947368421,
+            "f1": 0.653104359313078,
+            "support": 1957
+          },
+          "Neutral": {
+            "precision": 0.5341348218119365,
+            "recall": 0.6241846462619167,
+            "f1": 0.5756594169366034,
+            "support": 1993
+          },
+          "Positive": {
+            "precision": 0.7434733257661748,
+            "recall": 0.665312341289995,
+            "f1": 0.702224604663629,
+            "support": 1969
+          }
+        }
+      }
+    }
+  },
   "comparison_summary": {
     "accuracy": {
       "baseline": 0.6996114208481162,
@@ -138,5 +244,67 @@
       "fine_tuned": 0.9353759336779376,
       "delta": 0.07825406942042645
     }
+  },
+  "classic_comparison_summary": {
+    "tfidf_logreg": {
+      "accuracy": {
+        "classic": 0.6509545531339753,
+        "fine_tuned": 0.7974319986484203,
+        "delta": 0.14647744551444497
+      },
+      "precision_macro": {
+        "classic": 0.6678708452525676,
+        "fine_tuned": 0.7966669005906711,
+        "delta": 0.12879605533810357
+      },
+      "recall_macro": {
+        "classic": 0.6508671333307666,
+        "fine_tuned": 0.7979167809759827,
+        "delta": 0.1470496476452161
+      },
+      "f1_macro": {
+        "classic": 0.6550501046870366,
+        "fine_tuned": 0.7967694982592616,
+        "delta": 0.14171939357222496
+      },
+      "roc_auc_ovr_macro": {
+        "classic": 0.8340539282490423,
+        "fine_tuned": 0.9353759336779376,
+        "delta": 0.10132200542889525
+      }
+    },
+    "tfidf_linear_svm": {
+      "accuracy": {
+        "classic": 0.640310863321507,
+        "fine_tuned": 0.7974319986484203,
+        "delta": 0.1571211353269133
+      },
+      "precision_macro": {
+        "classic": 0.6512523146923391,
+        "fine_tuned": 0.7966669005906711,
+        "delta": 0.145414585898332
+      },
+      "recall_macro": {
+        "classic": 0.6403586449734443,
+        "fine_tuned": 0.7979167809759827,
+        "delta": 0.15755813600253843
+      },
+      "f1_macro": {
+        "classic": 0.6436627936377701,
+        "fine_tuned": 0.7967694982592616,
+        "delta": 0.15310670462149145
+      },
+      "roc_auc_ovr_macro": {
+        "classic": 0.8202230491903432,
+        "fine_tuned": 0.9353759336779376,
+        "delta": 0.11515288448759442
+      }
+    }
+  },
+  "thesis_artifacts": {
+    "confusion_matrix_figure": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\artifacts\\evaluation\\fine_tuned_confusion_matrix.png",
+    "loss_table_csv": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\artifacts\\evaluation\\loss_by_epoch.csv",
+    "loss_curve_figure": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\artifacts\\evaluation\\loss_train_vs_val.png",
+    "evaluation_all_metrics_csv": "C:\\Users\\GIGABYTE\\real_bachelor\\model_fine_tuning\\artifacts\\evaluation\\evaluation_all_metrics.csv"
   }
 }

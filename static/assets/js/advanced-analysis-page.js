@@ -375,6 +375,20 @@
                 }), 1);
                 const yTicks = buildYTicks(maxValue, { padding: padding, plotHeight: plotHeight });
                 const barWidth = plotWidth / Math.max(items.length, 1);
+                const trendPaths = (options.trendSeries || []).map(function (series) {
+                    return {
+                        color: series.color,
+                        path: buildTrendPath(
+                            items.map(function (item) { return Number(item[series.key]) || 0; }),
+                            width,
+                            height,
+                            padding,
+                            maxValue,
+                            options.trendOffset || 10,
+                            series.scale != null ? series.scale : (options.trendScale || 1)
+                        )
+                    };
+                });
                 const labelStep = getAxisLabelStep(items);
                 const showValueLabels = shouldShowDenseValueLabels(items.length);
                 const labeledValueIndexes = buildSparseValueLabelIndexSet(items.map(function (item) {
@@ -420,6 +434,11 @@
                         <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + plotHeight}" stroke="rgba(255,255,255,0.18)"></line>
                         ${yTicks.map(function (tick) {
                             return `<text x="${padding.left - 8}" y="${tick.y + 4}" text-anchor="end" fill="rgba(255,255,255,0.64)" font-size="10">${formatAxisValue(tick.value)}</text>`;
+                        }).join('')}
+                        ${trendPaths.map(function (trend) {
+                            return trend.path
+                                ? `<path d="${trend.path}" fill="none" stroke="${trend.color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"></path>`
+                                : '';
                         }).join('')}
                         ${bars}
                     </svg>
@@ -617,9 +636,23 @@
                                     positive: item.positive,
                                     neutral: item.neutral,
                                     negative: item.negative,
-                                    post_href: item.post_href
+                                    post_href: item.post_href,
+                                    positive_share: item.positive_share,
+                                    neutral_share: item.neutral_share,
+                                    negative_share: item.negative_share
                                 };
-                            }), { title: 'Sentiment by post', keys: ['positive', 'neutral', 'negative'], colors: sentimentColors })}
+                            }), {
+                                title: 'Sentiment by post',
+                                keys: ['positive', 'neutral', 'negative'],
+                                colors: sentimentColors,
+                                trendSeries: [
+                                    { key: 'positive_share', color: '#9be2b0', scale: 4.6 },
+                                    { key: 'neutral_share', color: '#ffe08a', scale: 4.6 },
+                                    { key: 'negative_share', color: '#ff9c7f', scale: 4.6 }
+                                ],
+                                trendOffset: 28,
+                                trendScale: 4.6
+                            })}
                             ${renderLegend([{ label: 'Positive', color: sentimentColors.positive }, { label: 'Neutral', color: sentimentColors.neutral }, { label: 'Negative', color: sentimentColors.negative }])}
                         </article>
                     `);
